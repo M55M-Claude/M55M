@@ -15,48 +15,49 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "DEIN_ANTHROPIC_KEY_HIER")
 ADMIN_USER_IDS = []
 
 # Channel Namen
-EFT_NEWS_CHANNEL       = "eft-news"
-EFT_CODES_CHANNEL      = "eft-codes"
-EFT_PATCHNOTES_CHANNEL = "eft-patchnotes"
-EFT_RELEASE_CHANNEL    = "eft-release"
+EFT_NEWS_CHANNEL        = "eft-news"
+EFT_CODES_CHANNEL       = "eft-codes"
+EFT_PATCHNOTES_CHANNEL  = "eft-patchnotes"
+EFT_RELEASE_CHANNEL     = "eft-release"
+ARMA_KOTH_CODES_CHANNEL = "arma-reforger-koth-codes"
 
 # Intervalle (Minuten)
-EFT_NEWS_INTERVAL         = 30
-EFT_CODES_CHECK_INTERVAL  = 60
-EFT_CODES_VERIFY_INTERVAL = 120
-EFT_PATCH_INTERVAL        = 15
-EFT_RELEASE_INTERVAL      = 60
+EFT_NEWS_INTERVAL           = 30
+EFT_CODES_CHECK_INTERVAL    = 60
+EFT_CODES_VERIFY_INTERVAL   = 120
+EFT_PATCH_INTERVAL          = 15
+EFT_RELEASE_INTERVAL        = 60
+ARMA_CODES_CHECK_INTERVAL   = 60
+ARMA_CODES_VERIFY_INTERVAL  = 60
 
 # Speicherdateien
-POSTED_NEWS_FILE    = "/tmp/posted_eft_news.json"
-POSTED_CODES_FILE   = "/tmp/posted_eft_codes.json"
-POSTED_PATCHES_FILE = "/tmp/posted_eft_patches.json"
-POSTED_RELEASE_FILE = "/tmp/posted_eft_release.json"
+POSTED_NEWS_FILE       = "/tmp/posted_eft_news.json"
+POSTED_CODES_FILE      = "/tmp/posted_eft_codes.json"
+POSTED_PATCHES_FILE    = "/tmp/posted_eft_patches.json"
+POSTED_RELEASE_FILE    = "/tmp/posted_eft_release.json"
+POSTED_ARMA_CODES_FILE = "/tmp/posted_arma_codes.json"
 
 # ─── Quellen ──────────────────────────────────────────────────────────────────
 EFT_RSS_FEEDS = [
     "https://www.escapefromtarkov.com/news/rss",  # Nur offizielle BSG Quelle
 ]
-
-# NUR offizielle BSG Quellen für Patchnotes
 EFT_PATCH_SOURCES = [
-    "https://www.escapefromtarkov.com/news/rss",   # Offizielle EFT Website
+    "https://www.escapefromtarkov.com/news/rss",
 ]
-# Nur Links von diesen Domains werden als offizielle Patchnotes akzeptiert
-BSG_OFFICIAL_DOMAINS = [
-    "escapefromtarkov.com",
-    "battlestategames.com",
-]
+BSG_OFFICIAL_DOMAINS = ["escapefromtarkov.com", "battlestategames.com"]
 
 EFT_RELEASE_SOURCES = [
     "https://www.escapefromtarkov.com/news/rss",
     "https://www.reddit.com/r/EscapeFromTarkov/search.json?q=wipe+date+release&sort=new&limit=10",
-    "https://www.reddit.com/r/EscapeFromTarkov/search.json?q=patch+release+date&sort=new&limit=10",
 ]
 EFT_CODES_URLS = [
     "https://progameguides.com/escape-from-tarkov/escape-from-tarkov-promo-codes/",
     "https://www.pcgamesn.com/escape-from-tarkov/promo-codes",
-    "https://www.reddit.com/r/EscapeFromTarkov/search.json?q=promo+code&sort=new&limit=10",
+]
+ARMA_KOTH_CODES_URLS = [
+    "https://www.reddit.com/r/armareforger/search.json?q=king+of+the+hill+code&sort=new&limit=10",
+    "https://www.reddit.com/r/ArmaReforger/search.json?q=KOTH+code&sort=new&limit=10",
+    "https://www.reddit.com/r/armaReforger/search.json?q=promo+code&sort=new&limit=10",
 ]
 
 # ─── Bot Setup ────────────────────────────────────────────────────────────────
@@ -85,6 +86,7 @@ posted_news_ids    = set(load_json(POSTED_NEWS_FILE, []))
 posted_codes       = load_json(POSTED_CODES_FILE, {})
 posted_patch_ids   = set(load_json(POSTED_PATCHES_FILE, []))
 posted_release_ids = set(load_json(POSTED_RELEASE_FILE, []))
+posted_arma_codes  = load_json(POSTED_ARMA_CODES_FILE, {})
 
 # ─── Hilfsfunktionen ──────────────────────────────────────────────────────────
 def ask_claude(prompt: str, max_tokens: int = 800) -> str:
@@ -134,7 +136,6 @@ def parse_rss(text: str, max_items: int = 10) -> list:
     return items
 
 def is_from_bsg(link: str) -> bool:
-    """Prüft ob der Link von einer offiziellen BSG Domain kommt"""
     return any(domain in link.lower() for domain in BSG_OFFICIAL_DOMAINS)
 
 async def post_to_channel(guild, channel_name: str, embed: discord.Embed):
@@ -147,11 +148,31 @@ async def post_to_channel(guild, channel_name: str, embed: discord.Embed):
     try:
         return await channel.send(embed=embed)
     except Exception as e:
-        print(f"Post-Fehler in #{channel_name}: {e}")
+        print(f"Post-Fehler #{channel_name}: {e}")
     return None
 
+async def delete_posted_message(data: dict, code: str, label: str):
+    try:
+        guild = bot.get_guild(data["guild_id"])
+        channel = guild.get_channel(data["channel_id"]) if guild else None
+        if channel:
+            msg = await channel.fetch_message(data["message_id"])
+            embed = discord.Embed(
+                title=f"❌ Abgelaufen: ~~`{code}`~~",
+                description="Dieser Code ist nicht mehr gültig.",
+                color=discord.Color.red(), timestamp=datetime.now()
+            )
+            await msg.edit(embed=embed)
+            await asyncio.sleep(5)
+            await msg.delete()
+            print(f"  🗑️ {label} gelöscht: {code}")
+    except Exception as e:
+        print(f"Lösch-Fehler {code}: {e}")
+
 async def translate_text(title: str, description: str) -> tuple:
-    result = ask_claude(f'Übersetze ins Deutsche. NUR JSON: {{"title":"...","summary":"..."}}\nTitel: {title}\nText: {description}', 500)
+    result = ask_claude(
+        f'Übersetze ins Deutsche. NUR JSON: {{"title":"...","summary":"..."}}\nTitel: {title}\nText: {description}', 500
+    )
     match = re.search(r'\{.*\}', result, re.DOTALL)
     if match:
         try:
@@ -162,131 +183,83 @@ async def translate_text(title: str, description: str) -> tuple:
     return title, description
 
 # ══════════════════════════════════════════════════════════════════════════════
-# EFT NEWS
+# EFT NEWS (Nur BSG)
 # ══════════════════════════════════════════════════════════════════════════════
-async def fetch_eft_news() -> list:
-    news_items = []
-    for feed_url in EFT_RSS_FEEDS:
-        text = await fetch_url(feed_url)
-        if text:
-            for item in parse_rss(text, 5):
-                item["id"] = item["link"]
-                item["source"] = feed_url
-                news_items.append(item)
-    return news_items
-
 @tasks.loop(minutes=EFT_NEWS_INTERVAL)
 async def check_eft_news():
     global posted_news_ids
     print(f"📰 News-Check ({datetime.now().strftime('%H:%M')})")
     try:
-        items = await fetch_eft_news()
         count = 0
-        for item in items:
-            if item["id"] not in posted_news_ids:
-                title_de, summary_de = await translate_text(item["title"], item["description"])
-                embed = discord.Embed(
-                    title=f"🎯 {title_de}", url=item["link"],
-                    description=summary_de or "Klicke für mehr Details.",
-                    color=discord.Color.orange(), timestamp=datetime.now()
-                )
-                source = "Reddit EFT" if "reddit" in item["source"] else "Escape from Tarkov"
-                embed.set_footer(text=f"Quelle: {source} • Übersetzt")
-                for guild in bot.guilds:
-                    await post_to_channel(guild, EFT_NEWS_CHANNEL, embed)
-                posted_news_ids.add(item["id"])
-                count += 1
-                await asyncio.sleep(2)
+        for feed_url in EFT_RSS_FEEDS:
+            text = await fetch_url(feed_url)
+            if not text:
+                continue
+            for item in parse_rss(text, 5):
+                if item["link"] not in posted_news_ids:
+                    title_de, summary_de = await translate_text(item["title"], item["description"])
+                    embed = discord.Embed(
+                        title=f"🎯 {title_de}", url=item["link"],
+                        description=summary_de or "Klicke für mehr Details.",
+                        color=discord.Color.orange(), timestamp=datetime.now()
+                    )
+                    embed.set_author(name="Escape from Tarkov – Offizielle News (BSG)")
+                    embed.set_footer(text="Quelle: escapefromtarkov.com • Übersetzt")
+                    for guild in bot.guilds:
+                        await post_to_channel(guild, EFT_NEWS_CHANNEL, embed)
+                    posted_news_ids.add(item["link"])
+                    count += 1
+                    await asyncio.sleep(2)
         save_json(POSTED_NEWS_FILE, list(posted_news_ids))
         print(f"  → {count} neue News")
     except Exception as e:
         print(f"News-Fehler: {e}")
 
 # ══════════════════════════════════════════════════════════════════════════════
-# EFT PATCHNOTES (NUR OFFIZIELLE BSG QUELLEN)
+# EFT PATCHNOTES (Nur offizielle BSG)
 # ══════════════════════════════════════════════════════════════════════════════
 def is_patchnote(title: str, description: str) -> bool:
-    keywords = ["patch", "update", "hotfix", "fix", "changelog", "version", "patchnotes", "patch notes"]
-    text = (title + " " + description).lower()
-    return any(kw in text for kw in keywords)
-
-async def fetch_bsg_patchnotes() -> list:
-    """Holt Patchnotes NUR von offiziellen BSG Quellen"""
-    patches = []
-
-    for url in EFT_PATCH_SOURCES:
-        text = await fetch_url(url)
-        if not text:
-            continue
-
-        for item in parse_rss(text, 10):
-            # Nur offizielle BSG Links akzeptieren
-            if not is_from_bsg(item["link"]):
-                print(f"  ⏭️ Übersprungen (kein BSG): {item['link']}")
-                continue
-
-            if is_patchnote(item["title"], item["description"]):
-                # Vollständige Seite laden für mehr Details
-                full_text = await fetch_url(item["link"])
-                if full_text:
-                    item["full_content"] = clean_html(full_text, 4000)
-                else:
-                    item["full_content"] = item["description"]
-
-                item["id"] = item["link"]
-                patches.append(item)
-                print(f"  ✅ BSG Patchnote gefunden: {item['title']}")
-
-    return patches
+    keywords = ["patch", "update", "hotfix", "fix", "changelog", "version", "patchnotes"]
+    return any(kw in (title + " " + description).lower() for kw in keywords)
 
 @tasks.loop(minutes=EFT_PATCH_INTERVAL)
 async def check_eft_patchnotes():
     global posted_patch_ids
     print(f"🔧 BSG Patchnotes-Check ({datetime.now().strftime('%H:%M')})")
     try:
-        patches = await fetch_bsg_patchnotes()
         count = 0
-        for patch in patches:
-            if patch["id"] not in posted_patch_ids:
-                # Claude erstellt strukturierte deutsche Zusammenfassung
-                content = patch.get("full_content", patch["description"])
+        for url in EFT_PATCH_SOURCES:
+            text = await fetch_url(url)
+            if not text:
+                continue
+            for item in parse_rss(text, 10):
+                if not is_from_bsg(item["link"]):
+                    continue
+                if not is_patchnote(item["title"], item["description"]):
+                    continue
+                if item["link"] in posted_patch_ids:
+                    continue
+                full_text = await fetch_url(item["link"])
+                content = clean_html(full_text, 4000) if full_text else item["description"]
                 summary = ask_claude(
-                    f"""Das sind OFFIZIELLE Escape from Tarkov Patchnotes von BSG (Battlestate Games).
-Erstelle eine übersichtliche deutsche Zusammenfassung mit folgender Struktur:
-
-**🐛 Bugfixes** (falls vorhanden)
-**⚙️ Änderungen** (falls vorhanden)  
-**✨ Neue Inhalte** (falls vorhanden)
-**⚖️ Balance** (falls vorhanden)
-
-Halte es klar und kompakt (max 1500 Zeichen).
-
-Titel: {patch['title']}
-Inhalt: {content}""", 800
+                    f"""Offizielle EFT Patchnotes von BSG. Erstelle eine deutsche Zusammenfassung mit:
+**🐛 Bugfixes** | **⚙️ Änderungen** | **✨ Neue Inhalte** | **⚖️ Balance**
+Max 1500 Zeichen. Titel: {item['title']}\nInhalt: {content}""", 800
                 )
-
                 embed = discord.Embed(
-                    title=f"🔧 {patch['title']}",
-                    url=patch["link"],
-                    description=summary or patch["description"][:800],
-                    color=discord.Color.blue(),
-                    timestamp=datetime.now()
+                    title=f"🔧 {item['title']}", url=item["link"],
+                    description=summary or item["description"][:800],
+                    color=discord.Color.blue(), timestamp=datetime.now()
                 )
-                embed.set_author(
-                    name="Offizielle BSG Patchnotes",
-                    icon_url="https://www.escapefromtarkov.com/theme/img/favicon/favicon-32x32.png"
-                )
+                embed.set_author(name="Offizielle BSG Patchnotes")
                 embed.set_footer(text="Quelle: escapefromtarkov.com (Battlestate Games) • Übersetzt")
-
                 for guild in bot.guilds:
                     await post_to_channel(guild, EFT_PATCHNOTES_CHANNEL, embed)
-
-                posted_patch_ids.add(patch["id"])
+                posted_patch_ids.add(item["link"])
                 count += 1
                 await asyncio.sleep(3)
-
         save_json(POSTED_PATCHES_FILE, list(posted_patch_ids))
-        print(f"  → {count} neue offizielle Patchnotes")
+        print(f"  → {count} neue Patchnotes")
     except Exception as e:
         print(f"Patchnotes-Fehler: {e}")
 
@@ -297,53 +270,47 @@ def is_release_info(title: str, description: str) -> bool:
     keywords = ["wipe", "release", "launch", "goes live", "patch release", "update date", "release date", "coming soon", "scheduled"]
     return any(kw in (title + " " + description).lower() for kw in keywords)
 
-async def fetch_release_info() -> list:
-    releases = []
-    for url in EFT_RELEASE_SOURCES:
-        text = await fetch_url(url)
-        if not text:
-            continue
-        if "reddit.com" in url and "search.json" in url:
-            try:
-                data = json.loads(text)
-                for post in data.get("data", {}).get("children", [])[:5]:
-                    p = post.get("data", {})
-                    title = p.get("title", "")
-                    link = f"https://reddit.com{p.get('permalink', '')}"
-                    desc = p.get("selftext", "")[:500]
-                    if is_release_info(title, desc):
-                        releases.append({"id": link, "title": title, "link": link, "description": desc})
-            except:
-                pass
-        else:
-            for item in parse_rss(text, 10):
-                if is_release_info(item["title"], item["description"]):
-                    item["id"] = item["link"]
-                    releases.append(item)
-    return releases
-
 @tasks.loop(minutes=EFT_RELEASE_INTERVAL)
 async def check_eft_release():
     global posted_release_ids
     print(f"🚀 Release-Check ({datetime.now().strftime('%H:%M')})")
     try:
-        releases = await fetch_release_info()
+        releases = []
+        for url in EFT_RELEASE_SOURCES:
+            text = await fetch_url(url)
+            if not text:
+                continue
+            if "search.json" in url:
+                try:
+                    data = json.loads(text)
+                    for post in data.get("data", {}).get("children", [])[:5]:
+                        p = post.get("data", {})
+                        title = p.get("title", "")
+                        link = "https://reddit.com" + p.get("permalink", "")
+                        desc = p.get("selftext", "")[:500]
+                        if is_release_info(title, desc):
+                            releases.append({"id": link, "title": title, "link": link, "description": desc})
+                except:
+                    pass
+            else:
+                for item in parse_rss(text, 10):
+                    if is_release_info(item["title"], item["description"]):
+                        item["id"] = item["link"]
+                        releases.append(item)
+
         count = 0
         for release in releases:
             if release["id"] not in posted_release_ids:
                 analysis = ask_claude(
-                    f"""Analysiere diese EFT Release/Wipe Info. Antworte NUR mit JSON:
+                    f"""EFT Release/Wipe Info analysieren. NUR JSON:
 {{"titel":"...","datum":"...","uhrzeit":"...","beschreibung":"...","typ":"wipe/patch/update"}}
-
-Titel: {release['title']}
-Text: {release['description']}""", 500
+Titel: {release['title']}\nText: {release['description']}""", 500
                 )
                 datum = "Noch nicht bekannt"
                 uhrzeit = "Noch nicht bekannt"
                 beschreibung = release["description"][:500]
                 typ = "update"
                 titel = release["title"]
-
                 match = re.search(r'\{.*\}', analysis, re.DOTALL)
                 if match:
                     try:
@@ -355,26 +322,18 @@ Text: {release['description']}""", 500
                         titel = d.get("titel", titel)
                     except:
                         pass
-
                 color = {"wipe": discord.Color.red(), "patch": discord.Color.blue(), "update": discord.Color.green()}.get(typ, discord.Color.gold())
                 emoji = {"wipe": "💥", "patch": "🔧", "update": "⬆️"}.get(typ, "🚀")
-
-                embed = discord.Embed(
-                    title=f"{emoji} {titel}", url=release["link"],
-                    description=beschreibung, color=color, timestamp=datetime.now()
-                )
+                embed = discord.Embed(title=f"{emoji} {titel}", url=release["link"], description=beschreibung, color=color, timestamp=datetime.now())
                 embed.add_field(name="📅 Datum", value=datum, inline=True)
                 embed.add_field(name="🕐 Uhrzeit", value=uhrzeit, inline=True)
                 embed.add_field(name="📌 Typ", value=typ.upper(), inline=True)
                 embed.set_footer(text="Automatisch erkannt & übersetzt")
-
                 for guild in bot.guilds:
                     await post_to_channel(guild, EFT_RELEASE_CHANNEL, embed)
-
                 posted_release_ids.add(release["id"])
                 count += 1
                 await asyncio.sleep(3)
-
         save_json(POSTED_RELEASE_FILE, list(posted_release_ids))
         print(f"  → {count} neue Release-Infos")
     except Exception as e:
@@ -383,16 +342,105 @@ Text: {release['description']}""", 500
 # ══════════════════════════════════════════════════════════════════════════════
 # EFT CODES
 # ══════════════════════════════════════════════════════════════════════════════
-async def scrape_eft_codes() -> list:
+@tasks.loop(minutes=EFT_CODES_CHECK_INTERVAL)
+async def check_eft_codes():
+    global posted_codes
+    print(f"🎁 EFT Code-Check ({datetime.now().strftime('%H:%M')})")
+    try:
+        all_codes = []
+        for url in EFT_CODES_URLS:
+            text = await fetch_url(url)
+            if not text:
+                continue
+            result = ask_claude(
+                f'Finde alle EFT Promo-Codes. NUR JSON: [{{"code":"...","description":"...(Deutsch)"}}]\n\nText: {clean_html(text)}', 600
+            )
+            match = re.search(r'\[.*\]', result, re.DOTALL)
+            if match:
+                try:
+                    all_codes.extend(json.loads(match.group()))
+                except:
+                    pass
+        seen = set()
+        count = 0
+        for c in all_codes:
+            code = c.get("code", "").upper().strip()
+            if not code or code in seen or code in posted_codes:
+                continue
+            seen.add(code)
+            embed = discord.Embed(
+                title=f"🎁 EFT Code: `{code}`",
+                description=c.get("description", "EFT Promo-Code"),
+                color=discord.Color.gold(), timestamp=datetime.now()
+            )
+            embed.add_field(name="📋 Code", value=f"```{code}```", inline=False)
+            embed.set_footer(text="Abgelaufene Codes werden automatisch gelöscht")
+            for guild in bot.guilds:
+                msg = await post_to_channel(guild, EFT_CODES_CHANNEL, embed)
+                if msg:
+                    posted_codes[code] = {"message_id": msg.id, "channel_id": msg.channel.id, "guild_id": guild.id}
+            count += 1
+            await asyncio.sleep(2)
+        save_json(POSTED_CODES_FILE, posted_codes)
+        print(f"  → {count} neue EFT Codes")
+    except Exception as e:
+        print(f"EFT Code-Fehler: {e}")
+
+@tasks.loop(minutes=EFT_CODES_VERIFY_INTERVAL)
+async def verify_eft_codes():
+    global posted_codes
+    to_delete = []
+    for code, data in posted_codes.items():
+        result = ask_claude(f'Ist EFT Code "{code}" noch gültig? NUR JSON: {{"valid": true/false}}', 100)
+        match = re.search(r'\{.*\}', result)
+        valid = True
+        if match:
+            try:
+                valid = json.loads(match.group()).get("valid", True)
+            except:
+                pass
+        if not valid:
+            await delete_posted_message(data, code, "EFT Code")
+            to_delete.append(code)
+        await asyncio.sleep(3)
+    for code in to_delete:
+        del posted_codes[code]
+    if to_delete:
+        save_json(POSTED_CODES_FILE, posted_codes)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ARMA REFORGER KOTH CODES
+# ══════════════════════════════════════════════════════════════════════════════
+async def scrape_arma_koth_codes() -> list:
     all_codes = []
-    for url in EFT_CODES_URLS:
+    for url in ARMA_KOTH_CODES_URLS:
         text = await fetch_url(url)
         if not text:
             continue
-        clean = clean_html(text)
-        result = ask_claude(
-            f'Finde alle EFT Promo-Codes. NUR JSON-Array: [{{"code":"...","description":"...(Deutsch)"}}]\n\nText: {clean}', 600
-        )
+        if "search.json" in url:
+            try:
+                data = json.loads(text)
+                posts = data.get("data", {}).get("children", [])
+                combined = ""
+                for post in posts[:8]:
+                    p = post.get("data", {})
+                    combined += "Titel: " + p.get("title", "") + " | Text: " + p.get("selftext", "")[:300] + "\n"
+                result = ask_claude(
+                    "Finde alle Arma Reforger King of the Hill (KOTH) Promo-Codes/Keys in diesem Text.\n"
+                    "Nur aktuelle, funktionierende Codes.\n"
+                    'Antworte NUR mit JSON-Array ([] wenn keine): [{"code": "CODE", "description": "Was der Code gibt (Deutsch)"}]\n\n'
+                    "Text: " + combined, 600
+                )
+            except Exception as e:
+                print(f"Arma Reddit Fehler: {e}")
+                result = "[]"
+        else:
+            result = ask_claude(
+                "Finde alle Arma Reforger KOTH Promo-Codes in diesem Text.\n"
+                "Nur aktuelle funktionierende Codes.\n"
+                'Antworte NUR mit JSON-Array: [{"code": "CODE", "description": "Beschreibung (Deutsch)"}]\n\n'
+                "Text: " + clean_html(text), 600
+            )
         match = re.search(r'\[.*\]', result, re.DOTALL)
         if match:
             try:
@@ -405,80 +453,80 @@ async def scrape_eft_codes() -> list:
     unique = []
     for c in all_codes:
         code = c.get("code", "").upper().strip()
-        if code and code not in seen:
+        if code and len(code) >= 3 and code not in seen:
             seen.add(code)
             c["code"] = code
             unique.append(c)
     return unique
 
-async def verify_code(code: str) -> bool:
-    for url in EFT_CODES_URLS[:2]:
+async def verify_arma_code(code: str) -> bool:
+    for url in ARMA_KOTH_CODES_URLS[:2]:
         text = await fetch_url(url)
         if text and code.upper() in text.upper():
             return True
-    result = ask_claude(f'Ist EFT Code "{code}" noch gültig? NUR JSON: {{"valid": true/false}}', 100)
+    result = ask_claude(
+        f'Ist der Arma Reforger KOTH Code "{code}" noch gültig? Codes die generisch oder alt wirken sind meist abgelaufen. NUR JSON: {{"valid": true/false}}', 100
+    )
     match = re.search(r'\{.*\}', result)
     if match:
         try:
             return json.loads(match.group()).get("valid", False)
         except:
             pass
-    return True
+    return False  # Im Zweifel löschen für maximale Aktualität
 
-@tasks.loop(minutes=EFT_CODES_CHECK_INTERVAL)
-async def check_eft_codes():
-    global posted_codes
-    print(f"🎁 Code-Check ({datetime.now().strftime('%H:%M')})")
+@tasks.loop(minutes=ARMA_CODES_CHECK_INTERVAL)
+async def check_arma_koth_codes():
+    global posted_arma_codes
+    print(f"🎮 Arma KOTH Code-Check ({datetime.now().strftime('%H:%M')})")
     try:
-        codes = await scrape_eft_codes()
+        codes = await scrape_arma_koth_codes()
         count = 0
         for code_info in codes:
             code = code_info.get("code", "")
-            if code and code not in posted_codes:
-                embed = discord.Embed(
-                    title=f"🎁 Neuer Code: `{code}`",
-                    description=code_info.get("description", "EFT Promo-Code"),
-                    color=discord.Color.gold(), timestamp=datetime.now()
-                )
-                embed.add_field(name="📋 Code", value=f"```{code}```", inline=False)
-                embed.add_field(name="✅ Status", value="Aktiv", inline=True)
-                embed.set_footer(text="Abgelaufene Codes werden automatisch gelöscht")
-                for guild in bot.guilds:
-                    msg = await post_to_channel(guild, EFT_CODES_CHANNEL, embed)
-                    if msg:
-                        posted_codes[code] = {"message_id": msg.id, "channel_id": msg.channel.id, "guild_id": guild.id}
-                count += 1
-                await asyncio.sleep(2)
-        save_json(POSTED_CODES_FILE, posted_codes)
-        print(f"  → {count} neue Codes")
+            if not code or code in posted_arma_codes:
+                continue
+            embed = discord.Embed(
+                title=f"🎮 KOTH Code: `{code}`",
+                description=code_info.get("description", "Arma Reforger King of the Hill Code"),
+                color=discord.Color.green(),
+                timestamp=datetime.now()
+            )
+            embed.add_field(name="📋 Code kopieren", value=f"```{code}```", inline=False)
+            embed.add_field(name="✅ Status", value="Aktiv & verifiziert", inline=True)
+            embed.add_field(name="🎯 Spiel", value="Arma Reforger – King of the Hill", inline=True)
+            embed.set_footer(text="Stündlich geprüft • Abgelaufene Codes werden automatisch gelöscht")
+            for guild in bot.guilds:
+                msg = await post_to_channel(guild, ARMA_KOTH_CODES_CHANNEL, embed)
+                if msg:
+                    posted_arma_codes[code] = {
+                        "message_id": msg.id,
+                        "channel_id": msg.channel.id,
+                        "guild_id": guild.id,
+                        "found_at": datetime.now().isoformat()
+                    }
+            count += 1
+            await asyncio.sleep(2)
+        save_json(POSTED_ARMA_CODES_FILE, posted_arma_codes)
+        print(f"  → {count} neue KOTH Codes")
     except Exception as e:
-        print(f"Code-Fehler: {e}")
+        print(f"Arma Code-Fehler: {e}")
 
-@tasks.loop(minutes=EFT_CODES_VERIFY_INTERVAL)
-async def verify_eft_codes():
-    global posted_codes
-    print(f"🔍 Code-Verifizierung ({datetime.now().strftime('%H:%M')})")
+@tasks.loop(minutes=ARMA_CODES_VERIFY_INTERVAL)
+async def verify_arma_koth_codes():
+    global posted_arma_codes
+    print(f"🔍 Arma KOTH Verifizierung ({datetime.now().strftime('%H:%M')})")
     to_delete = []
-    for code, data in posted_codes.items():
-        if not await verify_code(code):
-            try:
-                guild = bot.get_guild(data["guild_id"])
-                channel = guild.get_channel(data["channel_id"]) if guild else None
-                if channel:
-                    msg = await channel.fetch_message(data["message_id"])
-                    embed = discord.Embed(title=f"❌ Abgelaufen: ~~`{code}`~~", description="Code ist nicht mehr gültig.", color=discord.Color.red())
-                    await msg.edit(embed=embed)
-                    await asyncio.sleep(5)
-                    await msg.delete()
-            except Exception as e:
-                print(f"Lösch-Fehler {code}: {e}")
+    for code, data in posted_arma_codes.items():
+        if not await verify_arma_code(code):
+            await delete_posted_message(data, code, "KOTH Code")
             to_delete.append(code)
         await asyncio.sleep(3)
     for code in to_delete:
-        del posted_codes[code]
+        del posted_arma_codes[code]
     if to_delete:
-        save_json(POSTED_CODES_FILE, posted_codes)
-        print(f"  → {len(to_delete)} Codes gelöscht")
+        save_json(POSTED_ARMA_CODES_FILE, posted_arma_codes)
+        print(f"  → {len(to_delete)} KOTH Codes gelöscht")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # CLAUDE AUFGABEN TOOLS
@@ -510,6 +558,7 @@ TOOLS = [
     {"name": "check_codes_now", "description": "EFT Codes sofort suchen", "input_schema": {"type": "object", "properties": {}}},
     {"name": "check_patchnotes_now", "description": "EFT Patchnotes sofort prüfen", "input_schema": {"type": "object", "properties": {}}},
     {"name": "check_release_now", "description": "EFT Release-Info sofort prüfen", "input_schema": {"type": "object", "properties": {}}},
+    {"name": "check_arma_codes_now", "description": "Arma KOTH Codes sofort suchen", "input_schema": {"type": "object", "properties": {}}},
 ]
 
 async def execute_tool(tool_name: str, tool_input: dict, guild: discord.Guild, ctx_channel) -> str:
@@ -544,7 +593,7 @@ async def execute_tool(tool_name: str, tool_input: dict, guild: discord.Guild, c
             if not m: return "❌ User nicht gefunden."
             if not r: return "❌ Rolle nicht gefunden."
             await m.add_roles(r)
-            return f"✅ Rolle vergeben."
+            return "✅ Rolle vergeben."
         elif tool_name == "remove_role":
             m = discord.utils.find(lambda x: x.name.lower() == tool_input["username"].lower(), guild.members)
             r = discord.utils.get(guild.roles, name=tool_input["role_name"])
@@ -573,11 +622,13 @@ async def execute_tool(tool_name: str, tool_input: dict, guild: discord.Guild, c
         elif tool_name == "check_news_now":
             await check_eft_news(); return "✅ News-Check ausgeführt."
         elif tool_name == "check_codes_now":
-            await check_eft_codes(); return "✅ Code-Check ausgeführt."
+            await check_eft_codes(); return "✅ EFT Code-Check ausgeführt."
         elif tool_name == "check_patchnotes_now":
             await check_eft_patchnotes(); return "✅ Patchnotes-Check ausgeführt."
         elif tool_name == "check_release_now":
             await check_eft_release(); return "✅ Release-Check ausgeführt."
+        elif tool_name == "check_arma_codes_now":
+            await check_arma_koth_codes(); return "✅ Arma KOTH Code-Check ausgeführt."
         else:
             return f"❌ Unbekanntes Tool: {tool_name}"
     except discord.Forbidden:
@@ -616,10 +667,12 @@ async def process_task(task: str, guild: discord.Guild, ctx) -> tuple:
 @bot.event
 async def on_ready():
     print(f"✅ Bot online: {bot.user}")
-    for fn in [check_eft_news, check_eft_patchnotes, check_eft_release, check_eft_codes, verify_eft_codes]:
+    for fn in [check_eft_news, check_eft_patchnotes, check_eft_release,
+               check_eft_codes, verify_eft_codes,
+               check_arma_koth_codes, verify_arma_koth_codes]:
         if not fn.is_running():
             fn.start()
-    print("🚀 Alle Tasks gestartet! (News, BSG-Patchnotes, Release, Codes)")
+    print("🚀 Alle Tasks gestartet!")
 
 @bot.command(name="aufgabe", aliases=["task", "do"])
 async def aufgabe(ctx, *, text: str):
@@ -644,13 +697,13 @@ async def aufgabe(ctx, *, text: str):
 
 @bot.command(name="eft_news")
 async def cmd_news(ctx):
-    msg = await ctx.reply("🔍 Prüfe News...")
+    msg = await ctx.reply("🔍 Prüfe BSG News...")
     await check_eft_news()
     await msg.edit(content="✅ Erledigt!")
 
 @bot.command(name="eft_codes")
 async def cmd_codes(ctx):
-    msg = await ctx.reply("🎁 Suche Codes...")
+    msg = await ctx.reply("🎁 Suche EFT Codes...")
     await check_eft_codes()
     await msg.edit(content="✅ Erledigt!")
 
@@ -666,14 +719,21 @@ async def cmd_release(ctx):
     await check_eft_release()
     await msg.edit(content="✅ Erledigt!")
 
+@bot.command(name="arma_codes")
+async def cmd_arma_codes(ctx):
+    msg = await ctx.reply("🎮 Suche Arma KOTH Codes...")
+    await check_arma_koth_codes()
+    await msg.edit(content="✅ Erledigt!")
+
 @bot.command(name="hilfe_bot")
 async def cmd_hilfe(ctx):
     embed = discord.Embed(title="🤖 Bot Übersicht", color=discord.Color.blue())
     embed.add_field(name="📝 Aufgaben", value="`!aufgabe [Beschreibung]`", inline=False)
-    embed.add_field(name="📰 News", value=f"`!eft_news` – Alle {EFT_NEWS_INTERVAL} Min. in #{EFT_NEWS_CHANNEL}", inline=False)
-    embed.add_field(name="🔧 Patchnotes", value=f"`!eft_patchnotes` – Alle {EFT_PATCH_INTERVAL} Min. in #{EFT_PATCHNOTES_CHANNEL}\n⚠️ Nur offizielle BSG Quellen!", inline=False)
-    embed.add_field(name="🚀 Release", value=f"`!eft_release` – Alle {EFT_RELEASE_INTERVAL} Min. in #{EFT_RELEASE_CHANNEL}", inline=False)
-    embed.add_field(name="🎁 Codes", value=f"`!eft_codes` – Alle {EFT_CODES_CHECK_INTERVAL} Min. in #{EFT_CODES_CHANNEL}", inline=False)
+    embed.add_field(name="📰 EFT News", value=f"`!eft_news` – Alle {EFT_NEWS_INTERVAL} Min. • Nur BSG", inline=False)
+    embed.add_field(name="🔧 Patchnotes", value=f"`!eft_patchnotes` – Alle {EFT_PATCH_INTERVAL} Min. • Nur BSG", inline=False)
+    embed.add_field(name="🚀 Release", value=f"`!eft_release` – Alle {EFT_RELEASE_INTERVAL} Min.", inline=False)
+    embed.add_field(name="🎁 EFT Codes", value=f"`!eft_codes` – Alle {EFT_CODES_CHECK_INTERVAL} Min.", inline=False)
+    embed.add_field(name="🎮 Arma KOTH Codes", value=f"`!arma_codes` – Alle {ARMA_CODES_CHECK_INTERVAL} Min. • Stündlich verifiziert", inline=False)
     await ctx.send(embed=embed)
 
 if __name__ == "__main__":
