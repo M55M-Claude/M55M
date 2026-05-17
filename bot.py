@@ -12,403 +12,589 @@ from datetime import datetime
 # ─── Konfiguration ────────────────────────────────────────────────────────────
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "DEIN_DISCORD_TOKEN_HIER")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "DEIN_ANTHROPIC_KEY_HIER")
-ADMIN_USER_IDS = []  # Optional: Nur bestimmte User dürfen Aufgaben geben
+ADMIN_USER_IDS = []
 
-# EFT News Konfiguration
-EFT_NEWS_CHANNEL = "eft-news"       # Name des Discord Channels
-EFT_CHECK_INTERVAL = 30             # Minuten zwischen den Checks
-POSTED_NEWS_FILE = "/tmp/posted_eft_news.json"
+# Channel Namen
+EFT_NEWS_CHANNEL       = "eft-news"
+EFT_CODES_CHANNEL      = "eft-codes"
+EFT_PATCHNOTES_CHANNEL = "eft-patchnotes"
+EFT_RELEASE_CHANNEL    = "eft-release"
 
-# EFT News Quellen (RSS Feeds)
+# Intervalle (Minuten)
+EFT_NEWS_INTERVAL         = 30
+EFT_CODES_CHECK_INTERVAL  = 60
+EFT_CODES_VERIFY_INTERVAL = 120
+EFT_PATCH_INTERVAL        = 15
+EFT_RELEASE_INTERVAL      = 60
+
+# Speicherdateien
+POSTED_NEWS_FILE    = "/tmp/posted_eft_news.json"
+POSTED_CODES_FILE   = "/tmp/posted_eft_codes.json"
+POSTED_PATCHES_FILE = "/tmp/posted_eft_patches.json"
+POSTED_RELEASE_FILE = "/tmp/posted_eft_release.json"
+
+# ─── Quellen ──────────────────────────────────────────────────────────────────
 EFT_RSS_FEEDS = [
     "https://www.reddit.com/r/EscapeFromTarkov/new/.rss",
     "https://www.escapefromtarkov.com/news/rss",
+]
+
+# NUR offizielle BSG Quellen für Patchnotes
+EFT_PATCH_SOURCES = [
+    "https://www.escapefromtarkov.com/news/rss",   # Offizielle EFT Website
+]
+# Nur Links von diesen Domains werden als offizielle Patchnotes akzeptiert
+BSG_OFFICIAL_DOMAINS = [
+    "escapefromtarkov.com",
+    "battlestategames.com",
+]
+
+EFT_RELEASE_SOURCES = [
+    "https://www.escapefromtarkov.com/news/rss",
+    "https://www.reddit.com/r/EscapeFromTarkov/search.json?q=wipe+date+release&sort=new&limit=10",
+    "https://www.reddit.com/r/EscapeFromTarkov/search.json?q=patch+release+date&sort=new&limit=10",
+]
+EFT_CODES_URLS = [
+    "https://progameguides.com/escape-from-tarkov/escape-from-tarkov-promo-codes/",
+    "https://www.pcgamesn.com/escape-from-tarkov/promo-codes",
+    "https://www.reddit.com/r/EscapeFromTarkov/search.json?q=promo+code&sort=new&limit=10",
 ]
 
 # ─── Bot Setup ────────────────────────────────────────────────────────────────
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
-
 bot = commands.Bot(command_prefix="!", intents=intents)
-claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+claude_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
-# ─── News Tracking ────────────────────────────────────────────────────────────
-def load_posted_news():
+# ─── Datenspeicherung ─────────────────────────────────────────────────────────
+def load_json(path, default):
     try:
-        with open(POSTED_NEWS_FILE, "r") as f:
-            return set(json.load(f))
+        with open(path, "r") as f:
+            return json.load(f)
     except:
-        return set()
+        return default
 
-def save_posted_news(posted: set):
+def save_json(path, data):
     try:
-        with open(POSTED_NEWS_FILE, "w") as f:
-            json.dump(list(posted), f)
-    except:
-        pass
+        with open(path, "w") as f:
+            json.dump(data, f)
+    except Exception as e:
+        print(f"Speicherfehler: {e}")
 
-posted_news_ids = load_posted_news()
+posted_news_ids    = set(load_json(POSTED_NEWS_FILE, []))
+posted_codes       = load_json(POSTED_CODES_FILE, {})
+posted_patch_ids   = set(load_json(POSTED_PATCHES_FILE, []))
+posted_release_ids = set(load_json(POSTED_RELEASE_FILE, []))
 
-# ─── EFT News abrufen ─────────────────────────────────────────────────────────
-async def fetch_eft_news():
-    news_items = []
-    headers = {"User-Agent": "Mozilla/5.0 EFT-Discord-Bot/1.0"}
-
-    async with aiohttp.ClientSession(headers=headers) as session:
-        for feed_url in EFT_RSS_FEEDS:
-            try:
-                async with session.get(feed_url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                    if resp.status == 200:
-                        text = await resp.text()
-                        root = ET.fromstring(text)
-
-                        ns = {"atom": "http://www.w3.org/2005/Atom"}
-                        items = root.findall(".//item") or root.findall(".//atom:entry", ns)
-
-                        for item in items[:5]:
-                            title = (
-                                item.findtext("title") or
-                                item.findtext("atom:title", namespaces=ns) or ""
-                            ).strip()
-
-                            link_el = item.find("atom:link", ns)
-                            link = (
-                                item.findtext("link") or
-                                (link_el.get("href") if link_el is not None else "") or ""
-                            ).strip()
-
-                            description = (
-                                item.findtext("description") or
-                                item.findtext("atom:summary", namespaces=ns) or
-                                item.findtext("atom:content", namespaces=ns) or ""
-                            ).strip()
-                            description = re.sub(r'<[^>]+>', '', description)[:500]
-
-                            if title and link:
-                                news_items.append({
-                                    "id": link,
-                                    "title": title,
-                                    "link": link,
-                                    "description": description,
-                                    "source": feed_url
-                                })
-            except Exception as e:
-                print(f"Fehler beim Abrufen von {feed_url}: {e}")
-
-    return news_items
-
-# ─── News übersetzen ──────────────────────────────────────────────────────────
-async def translate_news(title: str, description: str) -> tuple:
+# ─── Hilfsfunktionen ──────────────────────────────────────────────────────────
+def ask_claude(prompt: str, max_tokens: int = 800) -> str:
     try:
-        response = claude.messages.create(
-            model="claude-opus-4-5",
-            max_tokens=500,
-            messages=[{
-                "role": "user",
-                "content": f"""Übersetze diese EFT News ins Deutsche.
-Antworte NUR mit JSON: {{"title": "...", "summary": "..."}}
-
-Titel: {title}
-Beschreibung: {description}"""
-            }]
+        response = claude_client.messages.create(
+            model="claude-opus-4-5", max_tokens=max_tokens,
+            messages=[{"role": "user", "content": prompt}]
         )
-        text = response.content[0].text
-        match = re.search(r'\{.*\}', text, re.DOTALL)
-        if match:
+        return response.content[0].text.strip()
+    except Exception as e:
+        print(f"Claude-Fehler: {e}")
+        return ""
+
+async def fetch_url(url: str) -> str:
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    try:
+        async with aiohttp.ClientSession(headers=headers) as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                if resp.status == 200:
+                    return await resp.text()
+    except Exception as e:
+        print(f"Fetch-Fehler ({url}): {e}")
+    return ""
+
+def clean_html(text: str, max_len: int = 3000) -> str:
+    text = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.DOTALL)
+    text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL)
+    text = re.sub(r'<[^>]+>', ' ', text)
+    return re.sub(r'\s+', ' ', text).strip()[:max_len]
+
+def parse_rss(text: str, max_items: int = 10) -> list:
+    items = []
+    try:
+        root = ET.fromstring(text)
+        ns = {"atom": "http://www.w3.org/2005/Atom"}
+        rss_items = root.findall(".//item") or root.findall(".//atom:entry", ns)
+        for item in rss_items[:max_items]:
+            title = (item.findtext("title") or item.findtext("atom:title", namespaces=ns) or "").strip()
+            link_el = item.find("atom:link", ns)
+            link = (item.findtext("link") or (link_el.get("href") if link_el is not None else "") or "").strip()
+            description = (item.findtext("description") or item.findtext("atom:summary", namespaces=ns) or "").strip()
+            description = re.sub(r'<[^>]+>', '', description)[:1000]
+            if title and link:
+                items.append({"title": title, "link": link, "description": description})
+    except Exception as e:
+        print(f"RSS-Parse-Fehler: {e}")
+    return items
+
+def is_from_bsg(link: str) -> bool:
+    """Prüft ob der Link von einer offiziellen BSG Domain kommt"""
+    return any(domain in link.lower() for domain in BSG_OFFICIAL_DOMAINS)
+
+async def post_to_channel(guild, channel_name: str, embed: discord.Embed):
+    channel = discord.utils.get(guild.text_channels, name=channel_name)
+    if not channel:
+        try:
+            channel = await guild.create_text_channel(channel_name)
+        except:
+            return None
+    try:
+        return await channel.send(embed=embed)
+    except Exception as e:
+        print(f"Post-Fehler in #{channel_name}: {e}")
+    return None
+
+async def translate_text(title: str, description: str) -> tuple:
+    result = ask_claude(f'Übersetze ins Deutsche. NUR JSON: {{"title":"...","summary":"..."}}\nTitel: {title}\nText: {description}', 500)
+    match = re.search(r'\{.*\}', result, re.DOTALL)
+    if match:
+        try:
             data = json.loads(match.group())
             return data.get("title", title), data.get("summary", description)
-    except Exception as e:
-        print(f"Übersetzungsfehler: {e}")
+        except:
+            pass
     return title, description
 
-# ─── News posten ──────────────────────────────────────────────────────────────
-async def post_news_to_discord(news: dict):
-    for guild in bot.guilds:
-        channel = discord.utils.get(guild.text_channels, name=EFT_NEWS_CHANNEL)
-        if not channel:
-            continue
+# ══════════════════════════════════════════════════════════════════════════════
+# EFT NEWS
+# ══════════════════════════════════════════════════════════════════════════════
+async def fetch_eft_news() -> list:
+    news_items = []
+    for feed_url in EFT_RSS_FEEDS:
+        text = await fetch_url(feed_url)
+        if text:
+            for item in parse_rss(text, 5):
+                item["id"] = item["link"]
+                item["source"] = feed_url
+                news_items.append(item)
+    return news_items
 
-        title_de, summary_de = await translate_news(news["title"], news["description"])
-
-        embed = discord.Embed(
-            title=f"🎯 {title_de}",
-            url=news["link"],
-            description=summary_de or "Klicke auf den Titel für mehr Details.",
-            color=discord.Color.orange(),
-            timestamp=datetime.now()
-        )
-        source_name = "Reddit EFT" if "reddit" in news["source"] else "Escape from Tarkov"
-        embed.set_footer(text=f"Quelle: {source_name} • Automatische Übersetzung")
-
-        try:
-            await channel.send(embed=embed)
-            print(f"✅ News gepostet: {title_de}")
-        except Exception as e:
-            print(f"❌ Fehler beim Posten: {e}")
-
-# ─── Automatischer News-Check ─────────────────────────────────────────────────
-@tasks.loop(minutes=EFT_CHECK_INTERVAL)
+@tasks.loop(minutes=EFT_NEWS_INTERVAL)
 async def check_eft_news():
     global posted_news_ids
-    print(f"🔍 Prüfe EFT News... ({datetime.now().strftime('%H:%M')})")
-
+    print(f"📰 News-Check ({datetime.now().strftime('%H:%M')})")
     try:
-        news_items = await fetch_eft_news()
-        new_count = 0
-
-        for item in news_items:
+        items = await fetch_eft_news()
+        count = 0
+        for item in items:
             if item["id"] not in posted_news_ids:
-                await post_news_to_discord(item)
+                title_de, summary_de = await translate_text(item["title"], item["description"])
+                embed = discord.Embed(
+                    title=f"🎯 {title_de}", url=item["link"],
+                    description=summary_de or "Klicke für mehr Details.",
+                    color=discord.Color.orange(), timestamp=datetime.now()
+                )
+                source = "Reddit EFT" if "reddit" in item["source"] else "Escape from Tarkov"
+                embed.set_footer(text=f"Quelle: {source} • Übersetzt")
+                for guild in bot.guilds:
+                    await post_to_channel(guild, EFT_NEWS_CHANNEL, embed)
                 posted_news_ids.add(item["id"])
-                new_count += 1
+                count += 1
                 await asyncio.sleep(2)
-
-        save_posted_news(posted_news_ids)
-        print(f"📰 {new_count} neue News gepostet!" if new_count > 0 else "ℹ️ Keine neuen News.")
+        save_json(POSTED_NEWS_FILE, list(posted_news_ids))
+        print(f"  → {count} neue News")
     except Exception as e:
-        print(f"❌ Fehler beim News-Check: {e}")
+        print(f"News-Fehler: {e}")
 
-# ─── Discord Tools für Claude ─────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# EFT PATCHNOTES (NUR OFFIZIELLE BSG QUELLEN)
+# ══════════════════════════════════════════════════════════════════════════════
+def is_patchnote(title: str, description: str) -> bool:
+    keywords = ["patch", "update", "hotfix", "fix", "changelog", "version", "patchnotes", "patch notes"]
+    text = (title + " " + description).lower()
+    return any(kw in text for kw in keywords)
+
+async def fetch_bsg_patchnotes() -> list:
+    """Holt Patchnotes NUR von offiziellen BSG Quellen"""
+    patches = []
+
+    for url in EFT_PATCH_SOURCES:
+        text = await fetch_url(url)
+        if not text:
+            continue
+
+        for item in parse_rss(text, 10):
+            # Nur offizielle BSG Links akzeptieren
+            if not is_from_bsg(item["link"]):
+                print(f"  ⏭️ Übersprungen (kein BSG): {item['link']}")
+                continue
+
+            if is_patchnote(item["title"], item["description"]):
+                # Vollständige Seite laden für mehr Details
+                full_text = await fetch_url(item["link"])
+                if full_text:
+                    item["full_content"] = clean_html(full_text, 4000)
+                else:
+                    item["full_content"] = item["description"]
+
+                item["id"] = item["link"]
+                patches.append(item)
+                print(f"  ✅ BSG Patchnote gefunden: {item['title']}")
+
+    return patches
+
+@tasks.loop(minutes=EFT_PATCH_INTERVAL)
+async def check_eft_patchnotes():
+    global posted_patch_ids
+    print(f"🔧 BSG Patchnotes-Check ({datetime.now().strftime('%H:%M')})")
+    try:
+        patches = await fetch_bsg_patchnotes()
+        count = 0
+        for patch in patches:
+            if patch["id"] not in posted_patch_ids:
+                # Claude erstellt strukturierte deutsche Zusammenfassung
+                content = patch.get("full_content", patch["description"])
+                summary = ask_claude(
+                    f"""Das sind OFFIZIELLE Escape from Tarkov Patchnotes von BSG (Battlestate Games).
+Erstelle eine übersichtliche deutsche Zusammenfassung mit folgender Struktur:
+
+**🐛 Bugfixes** (falls vorhanden)
+**⚙️ Änderungen** (falls vorhanden)  
+**✨ Neue Inhalte** (falls vorhanden)
+**⚖️ Balance** (falls vorhanden)
+
+Halte es klar und kompakt (max 1500 Zeichen).
+
+Titel: {patch['title']}
+Inhalt: {content}""", 800
+                )
+
+                embed = discord.Embed(
+                    title=f"🔧 {patch['title']}",
+                    url=patch["link"],
+                    description=summary or patch["description"][:800],
+                    color=discord.Color.blue(),
+                    timestamp=datetime.now()
+                )
+                embed.set_author(
+                    name="Offizielle BSG Patchnotes",
+                    icon_url="https://www.escapefromtarkov.com/theme/img/favicon/favicon-32x32.png"
+                )
+                embed.set_footer(text="Quelle: escapefromtarkov.com (Battlestate Games) • Übersetzt")
+
+                for guild in bot.guilds:
+                    await post_to_channel(guild, EFT_PATCHNOTES_CHANNEL, embed)
+
+                posted_patch_ids.add(patch["id"])
+                count += 1
+                await asyncio.sleep(3)
+
+        save_json(POSTED_PATCHES_FILE, list(posted_patch_ids))
+        print(f"  → {count} neue offizielle Patchnotes")
+    except Exception as e:
+        print(f"Patchnotes-Fehler: {e}")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# EFT RELEASE / WIPE DATES
+# ══════════════════════════════════════════════════════════════════════════════
+def is_release_info(title: str, description: str) -> bool:
+    keywords = ["wipe", "release", "launch", "goes live", "patch release", "update date", "release date", "coming soon", "scheduled"]
+    return any(kw in (title + " " + description).lower() for kw in keywords)
+
+async def fetch_release_info() -> list:
+    releases = []
+    for url in EFT_RELEASE_SOURCES:
+        text = await fetch_url(url)
+        if not text:
+            continue
+        if "reddit.com" in url and "search.json" in url:
+            try:
+                data = json.loads(text)
+                for post in data.get("data", {}).get("children", [])[:5]:
+                    p = post.get("data", {})
+                    title = p.get("title", "")
+                    link = f"https://reddit.com{p.get('permalink', '')}"
+                    desc = p.get("selftext", "")[:500]
+                    if is_release_info(title, desc):
+                        releases.append({"id": link, "title": title, "link": link, "description": desc})
+            except:
+                pass
+        else:
+            for item in parse_rss(text, 10):
+                if is_release_info(item["title"], item["description"]):
+                    item["id"] = item["link"]
+                    releases.append(item)
+    return releases
+
+@tasks.loop(minutes=EFT_RELEASE_INTERVAL)
+async def check_eft_release():
+    global posted_release_ids
+    print(f"🚀 Release-Check ({datetime.now().strftime('%H:%M')})")
+    try:
+        releases = await fetch_release_info()
+        count = 0
+        for release in releases:
+            if release["id"] not in posted_release_ids:
+                analysis = ask_claude(
+                    f"""Analysiere diese EFT Release/Wipe Info. Antworte NUR mit JSON:
+{{"titel":"...","datum":"...","uhrzeit":"...","beschreibung":"...","typ":"wipe/patch/update"}}
+
+Titel: {release['title']}
+Text: {release['description']}""", 500
+                )
+                datum = "Noch nicht bekannt"
+                uhrzeit = "Noch nicht bekannt"
+                beschreibung = release["description"][:500]
+                typ = "update"
+                titel = release["title"]
+
+                match = re.search(r'\{.*\}', analysis, re.DOTALL)
+                if match:
+                    try:
+                        d = json.loads(match.group())
+                        datum = d.get("datum", datum)
+                        uhrzeit = d.get("uhrzeit", uhrzeit)
+                        beschreibung = d.get("beschreibung", beschreibung)
+                        typ = d.get("typ", typ)
+                        titel = d.get("titel", titel)
+                    except:
+                        pass
+
+                color = {"wipe": discord.Color.red(), "patch": discord.Color.blue(), "update": discord.Color.green()}.get(typ, discord.Color.gold())
+                emoji = {"wipe": "💥", "patch": "🔧", "update": "⬆️"}.get(typ, "🚀")
+
+                embed = discord.Embed(
+                    title=f"{emoji} {titel}", url=release["link"],
+                    description=beschreibung, color=color, timestamp=datetime.now()
+                )
+                embed.add_field(name="📅 Datum", value=datum, inline=True)
+                embed.add_field(name="🕐 Uhrzeit", value=uhrzeit, inline=True)
+                embed.add_field(name="📌 Typ", value=typ.upper(), inline=True)
+                embed.set_footer(text="Automatisch erkannt & übersetzt")
+
+                for guild in bot.guilds:
+                    await post_to_channel(guild, EFT_RELEASE_CHANNEL, embed)
+
+                posted_release_ids.add(release["id"])
+                count += 1
+                await asyncio.sleep(3)
+
+        save_json(POSTED_RELEASE_FILE, list(posted_release_ids))
+        print(f"  → {count} neue Release-Infos")
+    except Exception as e:
+        print(f"Release-Fehler: {e}")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# EFT CODES
+# ══════════════════════════════════════════════════════════════════════════════
+async def scrape_eft_codes() -> list:
+    all_codes = []
+    for url in EFT_CODES_URLS:
+        text = await fetch_url(url)
+        if not text:
+            continue
+        clean = clean_html(text)
+        result = ask_claude(
+            f'Finde alle EFT Promo-Codes. NUR JSON-Array: [{{"code":"...","description":"...(Deutsch)"}}]\n\nText: {clean}', 600
+        )
+        match = re.search(r'\[.*\]', result, re.DOTALL)
+        if match:
+            try:
+                all_codes.extend(json.loads(match.group()))
+            except:
+                pass
+        await asyncio.sleep(1)
+
+    seen = set()
+    unique = []
+    for c in all_codes:
+        code = c.get("code", "").upper().strip()
+        if code and code not in seen:
+            seen.add(code)
+            c["code"] = code
+            unique.append(c)
+    return unique
+
+async def verify_code(code: str) -> bool:
+    for url in EFT_CODES_URLS[:2]:
+        text = await fetch_url(url)
+        if text and code.upper() in text.upper():
+            return True
+    result = ask_claude(f'Ist EFT Code "{code}" noch gültig? NUR JSON: {{"valid": true/false}}', 100)
+    match = re.search(r'\{.*\}', result)
+    if match:
+        try:
+            return json.loads(match.group()).get("valid", False)
+        except:
+            pass
+    return True
+
+@tasks.loop(minutes=EFT_CODES_CHECK_INTERVAL)
+async def check_eft_codes():
+    global posted_codes
+    print(f"🎁 Code-Check ({datetime.now().strftime('%H:%M')})")
+    try:
+        codes = await scrape_eft_codes()
+        count = 0
+        for code_info in codes:
+            code = code_info.get("code", "")
+            if code and code not in posted_codes:
+                embed = discord.Embed(
+                    title=f"🎁 Neuer Code: `{code}`",
+                    description=code_info.get("description", "EFT Promo-Code"),
+                    color=discord.Color.gold(), timestamp=datetime.now()
+                )
+                embed.add_field(name="📋 Code", value=f"```{code}```", inline=False)
+                embed.add_field(name="✅ Status", value="Aktiv", inline=True)
+                embed.set_footer(text="Abgelaufene Codes werden automatisch gelöscht")
+                for guild in bot.guilds:
+                    msg = await post_to_channel(guild, EFT_CODES_CHANNEL, embed)
+                    if msg:
+                        posted_codes[code] = {"message_id": msg.id, "channel_id": msg.channel.id, "guild_id": guild.id}
+                count += 1
+                await asyncio.sleep(2)
+        save_json(POSTED_CODES_FILE, posted_codes)
+        print(f"  → {count} neue Codes")
+    except Exception as e:
+        print(f"Code-Fehler: {e}")
+
+@tasks.loop(minutes=EFT_CODES_VERIFY_INTERVAL)
+async def verify_eft_codes():
+    global posted_codes
+    print(f"🔍 Code-Verifizierung ({datetime.now().strftime('%H:%M')})")
+    to_delete = []
+    for code, data in posted_codes.items():
+        if not await verify_code(code):
+            try:
+                guild = bot.get_guild(data["guild_id"])
+                channel = guild.get_channel(data["channel_id"]) if guild else None
+                if channel:
+                    msg = await channel.fetch_message(data["message_id"])
+                    embed = discord.Embed(title=f"❌ Abgelaufen: ~~`{code}`~~", description="Code ist nicht mehr gültig.", color=discord.Color.red())
+                    await msg.edit(embed=embed)
+                    await asyncio.sleep(5)
+                    await msg.delete()
+            except Exception as e:
+                print(f"Lösch-Fehler {code}: {e}")
+            to_delete.append(code)
+        await asyncio.sleep(3)
+    for code in to_delete:
+        del posted_codes[code]
+    if to_delete:
+        save_json(POSTED_CODES_FILE, posted_codes)
+        print(f"  → {len(to_delete)} Codes gelöscht")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CLAUDE AUFGABEN TOOLS
+# ══════════════════════════════════════════════════════════════════════════════
 TOOLS = [
-    {
-        "name": "send_message",
-        "description": "Sendet eine Nachricht in einen Discord-Channel",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "channel_name": {"type": "string"},
-                "message": {"type": "string"}
-            },
-            "required": ["channel_name", "message"]
-        }
-    },
-    {
-        "name": "send_dm",
-        "description": "Sendet eine Direktnachricht an einen User",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "username": {"type": "string"},
-                "message": {"type": "string"}
-            },
-            "required": ["username", "message"]
-        }
-    },
-    {
-        "name": "create_channel",
-        "description": "Erstellt einen neuen Text-Channel",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "channel_name": {"type": "string"},
-                "category": {"type": "string"},
-                "topic": {"type": "string"}
-            },
-            "required": ["channel_name"]
-        }
-    },
-    {
-        "name": "delete_channel",
-        "description": "Löscht einen Channel",
-        "input_schema": {
-            "type": "object",
-            "properties": {"channel_name": {"type": "string"}},
-            "required": ["channel_name"]
-        }
-    },
-    {
-        "name": "create_role",
-        "description": "Erstellt eine neue Rolle",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "role_name": {"type": "string"},
-                "color": {"type": "string"},
-                "mentionable": {"type": "boolean"}
-            },
-            "required": ["role_name"]
-        }
-    },
-    {
-        "name": "assign_role",
-        "description": "Weist einem User eine Rolle zu",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "username": {"type": "string"},
-                "role_name": {"type": "string"}
-            },
-            "required": ["username", "role_name"]
-        }
-    },
-    {
-        "name": "remove_role",
-        "description": "Entfernt eine Rolle von einem User",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "username": {"type": "string"},
-                "role_name": {"type": "string"}
-            },
-            "required": ["username", "role_name"]
-        }
-    },
-    {
-        "name": "kick_member",
-        "description": "Kickt einen User vom Server",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "username": {"type": "string"},
-                "reason": {"type": "string"}
-            },
-            "required": ["username"]
-        }
-    },
-    {
-        "name": "ban_member",
-        "description": "Bannt einen User",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "username": {"type": "string"},
-                "reason": {"type": "string"}
-            },
-            "required": ["username"]
-        }
-    },
-    {
-        "name": "list_members",
-        "description": "Listet alle Mitglieder auf",
-        "input_schema": {
-            "type": "object",
-            "properties": {"role_filter": {"type": "string"}}
-        }
-    },
-    {
-        "name": "list_channels",
-        "description": "Listet alle Channels auf",
-        "input_schema": {"type": "object", "properties": {}}
-    },
-    {
-        "name": "check_news_now",
-        "description": "Prüft sofort auf neue EFT News",
-        "input_schema": {"type": "object", "properties": {}}
-    }
+    {"name": "send_message", "description": "Sendet eine Nachricht in einen Channel",
+     "input_schema": {"type": "object", "properties": {"channel_name": {"type": "string"}, "message": {"type": "string"}}, "required": ["channel_name", "message"]}},
+    {"name": "send_dm", "description": "Direktnachricht an User",
+     "input_schema": {"type": "object", "properties": {"username": {"type": "string"}, "message": {"type": "string"}}, "required": ["username", "message"]}},
+    {"name": "create_channel", "description": "Erstellt einen Text-Channel",
+     "input_schema": {"type": "object", "properties": {"channel_name": {"type": "string"}, "category": {"type": "string"}, "topic": {"type": "string"}}, "required": ["channel_name"]}},
+    {"name": "delete_channel", "description": "Löscht einen Channel",
+     "input_schema": {"type": "object", "properties": {"channel_name": {"type": "string"}}, "required": ["channel_name"]}},
+    {"name": "create_role", "description": "Erstellt eine Rolle",
+     "input_schema": {"type": "object", "properties": {"role_name": {"type": "string"}, "color": {"type": "string"}, "mentionable": {"type": "boolean"}}, "required": ["role_name"]}},
+    {"name": "assign_role", "description": "Rolle an User vergeben",
+     "input_schema": {"type": "object", "properties": {"username": {"type": "string"}, "role_name": {"type": "string"}}, "required": ["username", "role_name"]}},
+    {"name": "remove_role", "description": "Rolle von User entfernen",
+     "input_schema": {"type": "object", "properties": {"username": {"type": "string"}, "role_name": {"type": "string"}}, "required": ["username", "role_name"]}},
+    {"name": "kick_member", "description": "User kicken",
+     "input_schema": {"type": "object", "properties": {"username": {"type": "string"}, "reason": {"type": "string"}}, "required": ["username"]}},
+    {"name": "ban_member", "description": "User bannen",
+     "input_schema": {"type": "object", "properties": {"username": {"type": "string"}, "reason": {"type": "string"}}, "required": ["username"]}},
+    {"name": "list_members", "description": "Mitglieder auflisten",
+     "input_schema": {"type": "object", "properties": {"role_filter": {"type": "string"}}}},
+    {"name": "list_channels", "description": "Channels auflisten",
+     "input_schema": {"type": "object", "properties": {}}},
+    {"name": "check_news_now", "description": "EFT News sofort prüfen", "input_schema": {"type": "object", "properties": {}}},
+    {"name": "check_codes_now", "description": "EFT Codes sofort suchen", "input_schema": {"type": "object", "properties": {}}},
+    {"name": "check_patchnotes_now", "description": "EFT Patchnotes sofort prüfen", "input_schema": {"type": "object", "properties": {}}},
+    {"name": "check_release_now", "description": "EFT Release-Info sofort prüfen", "input_schema": {"type": "object", "properties": {}}},
 ]
 
-# ─── Tool-Ausführung ──────────────────────────────────────────────────────────
 async def execute_tool(tool_name: str, tool_input: dict, guild: discord.Guild, ctx_channel) -> str:
     try:
         if tool_name == "send_message":
-            channel = discord.utils.get(guild.text_channels, name=tool_input["channel_name"])
-            if not channel:
-                return f"❌ Channel '{tool_input['channel_name']}' nicht gefunden."
-            await channel.send(tool_input["message"])
+            ch = discord.utils.get(guild.text_channels, name=tool_input["channel_name"])
+            if not ch: return "❌ Channel nicht gefunden."
+            await ch.send(tool_input["message"])
             return f"✅ Nachricht in #{tool_input['channel_name']} gesendet."
-
         elif tool_name == "send_dm":
-            member = discord.utils.find(lambda m: m.name.lower() == tool_input["username"].lower(), guild.members)
-            if not member:
-                return f"❌ User '{tool_input['username']}' nicht gefunden."
-            await member.send(tool_input["message"])
-            return f"✅ DM an {member.name} gesendet."
-
+            m = discord.utils.find(lambda x: x.name.lower() == tool_input["username"].lower(), guild.members)
+            if not m: return "❌ User nicht gefunden."
+            await m.send(tool_input["message"])
+            return f"✅ DM an {m.name} gesendet."
         elif tool_name == "create_channel":
-            existing = discord.utils.get(guild.text_channels, name=tool_input["channel_name"])
-            if existing:
-                return f"⚠️ Channel '{tool_input['channel_name']}' existiert bereits."
-            category = None
-            if tool_input.get("category"):
-                category = discord.utils.get(guild.categories, name=tool_input["category"])
-            channel = await guild.create_text_channel(
-                tool_input["channel_name"],
-                category=category,
-                topic=tool_input.get("topic", "")
-            )
-            return f"✅ Channel #{channel.name} erstellt."
-
+            if discord.utils.get(guild.text_channels, name=tool_input["channel_name"]): return "⚠️ Existiert bereits."
+            cat = discord.utils.get(guild.categories, name=tool_input.get("category", "")) if tool_input.get("category") else None
+            ch = await guild.create_text_channel(tool_input["channel_name"], category=cat, topic=tool_input.get("topic", ""))
+            return f"✅ Channel #{ch.name} erstellt."
         elif tool_name == "delete_channel":
-            channel = discord.utils.get(guild.text_channels, name=tool_input["channel_name"])
-            if not channel:
-                return f"❌ Channel '{tool_input['channel_name']}' nicht gefunden."
-            await channel.delete()
-            return f"✅ Channel '{tool_input['channel_name']}' gelöscht."
-
+            ch = discord.utils.get(guild.text_channels, name=tool_input["channel_name"])
+            if not ch: return "❌ Channel nicht gefunden."
+            await ch.delete()
+            return "✅ Channel gelöscht."
         elif tool_name == "create_role":
-            color = discord.Color.default()
-            if tool_input.get("color"):
-                color = discord.Color(int(tool_input["color"].lstrip("#"), 16))
-            role = await guild.create_role(name=tool_input["role_name"], color=color, mentionable=tool_input.get("mentionable", False))
-            return f"✅ Rolle '{role.name}' erstellt."
-
+            color = discord.Color(int(tool_input["color"].lstrip("#"), 16)) if tool_input.get("color") else discord.Color.default()
+            r = await guild.create_role(name=tool_input["role_name"], color=color, mentionable=tool_input.get("mentionable", False))
+            return f"✅ Rolle '{r.name}' erstellt."
         elif tool_name == "assign_role":
-            member = discord.utils.find(lambda m: m.name.lower() == tool_input["username"].lower(), guild.members)
-            role = discord.utils.get(guild.roles, name=tool_input["role_name"])
-            if not member: return f"❌ User nicht gefunden."
-            if not role: return f"❌ Rolle nicht gefunden."
-            await member.add_roles(role)
-            return f"✅ Rolle '{role.name}' an {member.name} vergeben."
-
+            m = discord.utils.find(lambda x: x.name.lower() == tool_input["username"].lower(), guild.members)
+            r = discord.utils.get(guild.roles, name=tool_input["role_name"])
+            if not m: return "❌ User nicht gefunden."
+            if not r: return "❌ Rolle nicht gefunden."
+            await m.add_roles(r)
+            return f"✅ Rolle vergeben."
         elif tool_name == "remove_role":
-            member = discord.utils.find(lambda m: m.name.lower() == tool_input["username"].lower(), guild.members)
-            role = discord.utils.get(guild.roles, name=tool_input["role_name"])
-            if not member: return f"❌ User nicht gefunden."
-            if not role: return f"❌ Rolle nicht gefunden."
-            await member.remove_roles(role)
-            return f"✅ Rolle '{role.name}' von {member.name} entfernt."
-
+            m = discord.utils.find(lambda x: x.name.lower() == tool_input["username"].lower(), guild.members)
+            r = discord.utils.get(guild.roles, name=tool_input["role_name"])
+            if not m: return "❌ User nicht gefunden."
+            if not r: return "❌ Rolle nicht gefunden."
+            await m.remove_roles(r)
+            return "✅ Rolle entfernt."
         elif tool_name == "kick_member":
-            member = discord.utils.find(lambda m: m.name.lower() == tool_input["username"].lower(), guild.members)
-            if not member: return f"❌ User nicht gefunden."
-            await member.kick(reason=tool_input.get("reason", "Kein Grund"))
-            return f"✅ {member.name} wurde gekickt."
-
+            m = discord.utils.find(lambda x: x.name.lower() == tool_input["username"].lower(), guild.members)
+            if not m: return "❌ User nicht gefunden."
+            await m.kick(reason=tool_input.get("reason", "Kein Grund"))
+            return f"✅ {m.name} gekickt."
         elif tool_name == "ban_member":
-            member = discord.utils.find(lambda m: m.name.lower() == tool_input["username"].lower(), guild.members)
-            if not member: return f"❌ User nicht gefunden."
-            await member.ban(reason=tool_input.get("reason", "Kein Grund"))
-            return f"✅ {member.name} wurde gebannt."
-
+            m = discord.utils.find(lambda x: x.name.lower() == tool_input["username"].lower(), guild.members)
+            if not m: return "❌ User nicht gefunden."
+            await m.ban(reason=tool_input.get("reason", "Kein Grund"))
+            return f"✅ {m.name} gebannt."
         elif tool_name == "list_members":
             members = guild.members
             if tool_input.get("role_filter"):
-                role = discord.utils.get(guild.roles, name=tool_input["role_filter"])
-                if role:
-                    members = [m for m in members if role in m.roles]
-            return f"👥 Mitglieder ({len(members)}): {', '.join(m.name for m in members)}"
-
+                r = discord.utils.get(guild.roles, name=tool_input["role_filter"])
+                if r: members = [x for x in members if r in x.roles]
+            return f"👥 {len(members)} Mitglieder: {', '.join(x.name for x in members)}"
         elif tool_name == "list_channels":
-            channels = [f"#{c.name}" for c in guild.text_channels]
-            return f"📋 Channels: {', '.join(channels)}"
-
+            return f"📋 {', '.join(f'#{c.name}' for c in guild.text_channels)}"
         elif tool_name == "check_news_now":
-            await check_eft_news()
-            return "✅ News-Check ausgeführt!"
-
+            await check_eft_news(); return "✅ News-Check ausgeführt."
+        elif tool_name == "check_codes_now":
+            await check_eft_codes(); return "✅ Code-Check ausgeführt."
+        elif tool_name == "check_patchnotes_now":
+            await check_eft_patchnotes(); return "✅ Patchnotes-Check ausgeführt."
+        elif tool_name == "check_release_now":
+            await check_eft_release(); return "✅ Release-Check ausgeführt."
         else:
             return f"❌ Unbekanntes Tool: {tool_name}"
-
     except discord.Forbidden:
-        return f"❌ Keine Berechtigung für '{tool_name}'."
+        return "❌ Keine Berechtigung."
     except Exception as e:
-        return f"❌ Fehler: {str(e)}"
+        return f"❌ Fehler: {e}"
 
-# ─── Claude Aufgaben-Verarbeitung ─────────────────────────────────────────────
-async def process_task_with_claude(task: str, guild: discord.Guild, ctx) -> tuple:
-    server_info = f"Server: {guild.name}, Channels: {', '.join(c.name for c in guild.text_channels[:15])}"
+async def process_task(task: str, guild: discord.Guild, ctx) -> tuple:
+    info = f"Server: {guild.name}, Channels: {', '.join(c.name for c in guild.text_channels[:15])}"
     messages = [{"role": "user", "content": task}]
     results = []
-
-    response = claude.messages.create(
-        model="claude-opus-4-5",
-        max_tokens=2048,
-        system=f"Du bist ein Discord-Bot-Assistent. {server_info}. Antworte auf Deutsch.",
-        tools=TOOLS,
-        messages=messages
+    response = claude_client.messages.create(
+        model="claude-opus-4-5", max_tokens=2048,
+        system=f"Du bist ein Discord-Bot-Assistent. {info}. Antworte auf Deutsch.",
+        tools=TOOLS, messages=messages
     )
-
     while response.stop_reason == "tool_use":
         tool_results = []
         for block in response.content:
@@ -416,65 +602,80 @@ async def process_task_with_claude(task: str, guild: discord.Guild, ctx) -> tupl
                 result = await execute_tool(block.name, block.input, guild, ctx.channel)
                 results.append(f"**{block.name}**: {result}")
                 tool_results.append({"type": "tool_result", "tool_use_id": block.id, "content": result})
-
         messages.append({"role": "assistant", "content": response.content})
         messages.append({"role": "user", "content": tool_results})
-
-        response = claude.messages.create(
-            model="claude-opus-4-5",
-            max_tokens=2048,
-            system=f"Discord-Bot-Assistent. Server: {guild.name}. Antworte auf Deutsch.",
-            tools=TOOLS,
-            messages=messages
+        response = claude_client.messages.create(
+            model="claude-opus-4-5", max_tokens=2048,
+            system=f"Discord-Bot. Server: {guild.name}. Antworte auf Deutsch.",
+            tools=TOOLS, messages=messages
         )
+    return next((b.text for b in response.content if hasattr(b, "text")), ""), results
 
-    final_text = next((b.text for b in response.content if hasattr(b, "text")), "")
-    return final_text, results
-
-# ─── Bot Events & Commands ────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# BOT COMMANDS
+# ══════════════════════════════════════════════════════════════════════════════
 @bot.event
 async def on_ready():
     print(f"✅ Bot online: {bot.user}")
-    if not check_eft_news.is_running():
-        check_eft_news.start()
-    print(f"📰 EFT News-Check gestartet (alle {EFT_CHECK_INTERVAL} Min.)")
+    for fn in [check_eft_news, check_eft_patchnotes, check_eft_release, check_eft_codes, verify_eft_codes]:
+        if not fn.is_running():
+            fn.start()
+    print("🚀 Alle Tasks gestartet! (News, BSG-Patchnotes, Release, Codes)")
 
 @bot.command(name="aufgabe", aliases=["task", "do"])
-async def aufgabe(ctx, *, aufgabe_text: str):
+async def aufgabe(ctx, *, text: str):
     if ADMIN_USER_IDS and ctx.author.id not in ADMIN_USER_IDS:
         await ctx.reply("❌ Keine Berechtigung.")
         return
     if not ctx.guild:
-        await ctx.reply("❌ Nur in einem Server nutzbar.")
+        await ctx.reply("❌ Nur in einem Server.")
         return
-
-    loading_msg = await ctx.reply("🤖 Verarbeite Aufgabe...")
+    loading = await ctx.reply("🤖 Verarbeite Aufgabe...")
     try:
-        final_text, actions = await process_task_with_claude(aufgabe_text, ctx.guild, ctx)
-        embed = discord.Embed(title="📋 Aufgabe ausgeführt", description=f"**Aufgabe:** {aufgabe_text}", color=discord.Color.green())
+        final, actions = await process_task(text, ctx.guild, ctx)
+        embed = discord.Embed(title="📋 Aufgabe ausgeführt", description=f"**Aufgabe:** {text}", color=discord.Color.green())
         if actions:
             embed.add_field(name="🔧 Aktionen", value="\n".join(actions[:10]), inline=False)
-        if final_text:
-            embed.add_field(name="💬 Claude sagt", value=final_text[:1024], inline=False)
-        embed.set_footer(text=f"Angefragt von {ctx.author.name}")
-        await loading_msg.edit(content=None, embed=embed)
+        if final:
+            embed.add_field(name="💬 Claude sagt", value=final[:1024], inline=False)
+        embed.set_footer(text=f"Von {ctx.author.name}")
+        await loading.edit(content=None, embed=embed)
     except Exception as e:
-        await loading_msg.edit(content=f"❌ Fehler: {str(e)}")
+        await loading.edit(content=f"❌ Fehler: {e}")
 
 @bot.command(name="eft_news")
-async def eft_news_cmd(ctx):
-    """Sofortiger EFT News Check"""
-    msg = await ctx.reply("🔍 Prüfe EFT News...")
+async def cmd_news(ctx):
+    msg = await ctx.reply("🔍 Prüfe News...")
     await check_eft_news()
-    await msg.edit(content="✅ News-Check abgeschlossen!")
+    await msg.edit(content="✅ Erledigt!")
+
+@bot.command(name="eft_codes")
+async def cmd_codes(ctx):
+    msg = await ctx.reply("🎁 Suche Codes...")
+    await check_eft_codes()
+    await msg.edit(content="✅ Erledigt!")
+
+@bot.command(name="eft_patchnotes")
+async def cmd_patches(ctx):
+    msg = await ctx.reply("🔧 Suche BSG Patchnotes...")
+    await check_eft_patchnotes()
+    await msg.edit(content="✅ Erledigt!")
+
+@bot.command(name="eft_release")
+async def cmd_release(ctx):
+    msg = await ctx.reply("🚀 Suche Release-Info...")
+    await check_eft_release()
+    await msg.edit(content="✅ Erledigt!")
 
 @bot.command(name="hilfe_bot")
-async def hilfe_bot(ctx):
-    embed = discord.Embed(title="🤖 Bot Hilfe", color=discord.Color.blue())
+async def cmd_hilfe(ctx):
+    embed = discord.Embed(title="🤖 Bot Übersicht", color=discord.Color.blue())
     embed.add_field(name="📝 Aufgaben", value="`!aufgabe [Beschreibung]`", inline=False)
-    embed.add_field(name="📰 EFT News", value=f"`!eft_news` - Sofort prüfen\nAutomatisch alle {EFT_CHECK_INTERVAL} Min.", inline=False)
+    embed.add_field(name="📰 News", value=f"`!eft_news` – Alle {EFT_NEWS_INTERVAL} Min. in #{EFT_NEWS_CHANNEL}", inline=False)
+    embed.add_field(name="🔧 Patchnotes", value=f"`!eft_patchnotes` – Alle {EFT_PATCH_INTERVAL} Min. in #{EFT_PATCHNOTES_CHANNEL}\n⚠️ Nur offizielle BSG Quellen!", inline=False)
+    embed.add_field(name="🚀 Release", value=f"`!eft_release` – Alle {EFT_RELEASE_INTERVAL} Min. in #{EFT_RELEASE_CHANNEL}", inline=False)
+    embed.add_field(name="🎁 Codes", value=f"`!eft_codes` – Alle {EFT_CODES_CHECK_INTERVAL} Min. in #{EFT_CODES_CHANNEL}", inline=False)
     await ctx.send(embed=embed)
 
-# ─── Start ────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     bot.run(DISCORD_TOKEN)
