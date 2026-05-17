@@ -1,4 +1,5 @@
 discord.py==2.3.2
 audioop-lts==0.2.1
 anthropic==0.40.0
+aiohttp==3.9.5
 python-dotenv==1.0.0
