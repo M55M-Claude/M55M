@@ -35,8 +35,7 @@ POSTED_RELEASE_FILE = "/tmp/posted_eft_release.json"
 
 # ─── Quellen ──────────────────────────────────────────────────────────────────
 EFT_RSS_FEEDS = [
-    "https://www.reddit.com/r/EscapeFromTarkov/new/.rss",
-    "https://www.escapefromtarkov.com/news/rss",
+    "https://www.escapefromtarkov.com/news/rss",  # Nur offizielle BSG Quelle
 ]
 
 # NUR offizielle BSG Quellen für Patchnotes
