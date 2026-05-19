@@ -42,9 +42,17 @@ EFT_RSS_FEEDS = [
     "https://www.escapefromtarkov.com/news/rss",  # Nur offizielle BSG Quelle
 ]
 EFT_PATCH_SOURCES = [
-    "https://www.escapefromtarkov.com/news/rss",
+    "https://www.escapefromtarkov.com/news/rss",      # Offizielle BSG Website
 ]
 BSG_OFFICIAL_DOMAINS = ["escapefromtarkov.com", "battlestategames.com"]
+
+# Offizielle Twitter/X Accounts (via Nitter RSS - kein API Key nötig)
+BSG_TWITTER_RSS_FEEDS = [
+    "https://nitter.privacydev.net/bstategames/rss",   # BSG offiziell
+    "https://nitter.privacydev.net/tarkov_game/rss",   # EFT offiziell
+    "https://nitter.poast.org/bstategames/rss",         # BSG Backup
+    "https://nitter.poast.org/tarkov_game/rss",         # EFT Backup
+]
 
 EFT_RELEASE_SOURCES = [
     "https://www.escapefromtarkov.com/news/rss",
@@ -222,12 +230,42 @@ def is_patchnote(title: str, description: str) -> bool:
     keywords = ["patch", "update", "hotfix", "fix", "changelog", "version", "patchnotes"]
     return any(kw in (title + " " + description).lower() for kw in keywords)
 
+async def post_patchnote(item: dict, source_label: str, source_icon: str = ""):
+    """Patchnote als Discord Embed posten"""
+    title = item.get("title", "")
+    link = item.get("link", "")
+    description = item.get("description", "")
+
+    full_text = await fetch_url(link) if link and "escapefromtarkov.com" in link else ""
+    content_for_claude = clean_html(full_text, 4000) if full_text else description
+
+    summary = ask_claude(
+        f"""Offizielle EFT/BSG Patchnote oder Update-Info. Erstelle eine deutsche Zusammenfassung.
+Struktur falls passend: **🐛 Bugfixes** | **⚙️ Änderungen** | **✨ Neue Inhalte** | **⚖️ Balance**
+Max 1000 Zeichen. Titel: {title}
+Inhalt: {content_for_claude[:2000]}""", 700
+    )
+
+    embed = discord.Embed(
+        title=f"🔧 {title[:200]}",
+        url=link,
+        description=summary or description[:800],
+        color=discord.Color.blue(),
+        timestamp=datetime.now()
+    )
+    embed.set_author(name=source_label)
+    embed.set_footer(text=f"Quelle: {source_label} • Automatisch übersetzt")
+
+    for guild in bot.guilds:
+        await post_to_channel(guild, EFT_PATCHNOTES_CHANNEL, embed)
+
 @tasks.loop(minutes=EFT_PATCH_INTERVAL)
 async def check_eft_patchnotes():
     global posted_patch_ids
     print(f"🔧 BSG Patchnotes-Check ({datetime.now().strftime('%H:%M')})")
+    count = 0
     try:
-        count = 0
+        # ── 1. Offizielle BSG Website ──────────────────────────────────────
         for url in EFT_PATCH_SOURCES:
             text = await fetch_url(url)
             if not text:
@@ -239,27 +277,38 @@ async def check_eft_patchnotes():
                     continue
                 if item["link"] in posted_patch_ids:
                     continue
-                full_text = await fetch_url(item["link"])
-                content = clean_html(full_text, 4000) if full_text else item["description"]
-                summary = ask_claude(
-                    f"""Offizielle EFT Patchnotes von BSG. Erstelle eine deutsche Zusammenfassung mit:
-**🐛 Bugfixes** | **⚙️ Änderungen** | **✨ Neue Inhalte** | **⚖️ Balance**
-Max 1500 Zeichen. Titel: {item['title']}\nInhalt: {content}""", 800
-                )
-                embed = discord.Embed(
-                    title=f"🔧 {item['title']}", url=item["link"],
-                    description=summary or item["description"][:800],
-                    color=discord.Color.blue(), timestamp=datetime.now()
-                )
-                embed.set_author(name="Offizielle BSG Patchnotes")
-                embed.set_footer(text="Quelle: escapefromtarkov.com (Battlestate Games) • Übersetzt")
-                for guild in bot.guilds:
-                    await post_to_channel(guild, EFT_PATCHNOTES_CHANNEL, embed)
+                await post_patchnote(item, "Offizielle BSG Website – escapefromtarkov.com")
                 posted_patch_ids.add(item["link"])
                 count += 1
                 await asyncio.sleep(3)
+
+        # ── 2. Offizielle Twitter/X Accounts (via Nitter RSS) ─────────────
+        for feed_url in BSG_TWITTER_RSS_FEEDS:
+            text = await fetch_url(feed_url)
+            if not text:
+                continue
+            for item in parse_rss(text, 15):
+                tweet_id = item["link"]
+                if tweet_id in posted_patch_ids:
+                    continue
+
+                # Nur Tweets die nach Patchnotes/Updates klingen
+                if not is_patchnote(item["title"], item["description"]):
+                    continue
+
+                # Account bestimmen
+                if "bstategames" in feed_url:
+                    label = "Twitter/X – @bstategames (Battlestate Games)"
+                else:
+                    label = "Twitter/X – @tarkov_game (Escape from Tarkov)"
+
+                await post_patchnote(item, label)
+                posted_patch_ids.add(tweet_id)
+                count += 1
+                await asyncio.sleep(3)
+
         save_json(POSTED_PATCHES_FILE, list(posted_patch_ids))
-        print(f"  → {count} neue Patchnotes")
+        print(f"  → {count} neue Patchnotes/Tweets")
     except Exception as e:
         print(f"Patchnotes-Fehler: {e}")
 
