@@ -37,6 +37,108 @@ POSTED_PATCHES_FILE    = "/tmp/posted_eft_patches.json"
 POSTED_RELEASE_FILE    = "/tmp/posted_eft_release.json"
 POSTED_ARMA_CODES_FILE = "/tmp/posted_arma_codes.json"
 
+# ─── Auto-Suche Konfiguration ────────────────────────────────────────────────
+AUTO_CHANNEL          = "autos"
+AUTO_CHECK_INTERVAL   = 30          # Minuten zwischen den Suchdurchläufen
+POSTED_AUTOS_FILE     = "/tmp/posted_autos.json"
+
+# Suchfilter – Skoda Kodiaq
+AUTO_MARKE      = "Skoda"
+AUTO_MODELL     = "Kodiaq"
+AUTO_PREIS_MIN  = 20000
+AUTO_PREIS_MAX  = 25000
+AUTO_KM_MAX     = 90000
+AUTO_JAHR_MIN   = 2020
+AUTO_JAHR_MAX   = 2026
+
+# ── Auto 2: VW Touareg ────────────────────────────────────────────────────────
+AUTO2_MARKE     = "VW"
+AUTO2_MODELL    = "Touareg"
+AUTO2_PREIS_MIN = 20000
+AUTO2_PREIS_MAX = 25000
+AUTO2_KM_MAX    = 125000
+AUTO2_JAHR_MIN  = 2019
+AUTO2_JAHR_MAX  = 2026
+
+# Direkte Such-URLs (RSS/JSON wo verfügbar, sonst HTML)
+AUTO_URLS = {
+    "AutoScout24": (
+        f"https://www.autoscout24.de/lst/skoda/kodiaq"
+        f"?atype=C&cy=D&damaged_listing=exclude"
+        f"&fregfrom={AUTO_JAHR_MIN}&fregto={AUTO_JAHR_MAX}"
+        f"&kmto={AUTO_KM_MAX}&pricefrom={AUTO_PREIS_MIN}&priceto={AUTO_PREIS_MAX}"
+        f"&sort=age&desc=0&size=20&page=1"
+    ),
+    "Mobile.de": (
+        f"https://suchen.mobile.de/fahrzeuge/search.html"
+        f"?dam=0&isSearchRequest=true&ms=25200%3B51%3B%3B&ref=dsp"
+        f"&s=Car&sb=rel&vc=Car"
+        f"&minFirstRegistrationDate={AUTO_JAHR_MIN}-01-01"
+        f"&maxFirstRegistrationDate={AUTO_JAHR_MAX}-12-31"
+        f"&minPrice={AUTO_PREIS_MIN}&maxPrice={AUTO_PREIS_MAX}"
+        f"&maxMileage={AUTO_KM_MAX}"
+    ),
+    "eBay Kleinanzeigen": (
+        f"https://www.kleinanzeigen.de/s-skoda-kodiaq/langenargen/k0c216l8464r250"
+        f"?minPrice={AUTO_PREIS_MIN}&maxPrice={AUTO_PREIS_MAX}"
+    ),
+}
+
+AUTO2_URLS = {
+    "AutoScout24": (
+        f"https://www.autoscout24.de/lst/volkswagen/touareg"
+        f"?atype=C&cy=D&damaged_listing=exclude"
+        f"&fregfrom={AUTO2_JAHR_MIN}&fregto={AUTO2_JAHR_MAX}"
+        f"&kmto={AUTO2_KM_MAX}&pricefrom={AUTO2_PREIS_MIN}&priceto={AUTO2_PREIS_MAX}"
+        f"&sort=age&desc=0&size=20&page=1"
+    ),
+    "Mobile.de": (
+        f"https://suchen.mobile.de/fahrzeuge/search.html"
+        f"?dam=0&isSearchRequest=true&ms=25200%3B51%3B%3B&ref=dsp"
+        f"&s=Car&sb=rel&vc=Car"
+        f"&minFirstRegistrationDate={AUTO2_JAHR_MIN}-01-01"
+        f"&maxFirstRegistrationDate={AUTO2_JAHR_MAX}-12-31"
+        f"&minPrice={AUTO2_PREIS_MIN}&maxPrice={AUTO2_PREIS_MAX}"
+        f"&maxMileage={AUTO2_KM_MAX}"
+    ),
+    "eBay Kleinanzeigen": (
+        f"https://www.kleinanzeigen.de/s-autos/vw-touareg/k0c216"
+        f"?minPrice={AUTO2_PREIS_MIN}&maxPrice={AUTO2_PREIS_MAX}"
+    ),
+}
+
+# ── Auto 3: VW Tiguan ─────────────────────────────────────────────────────────
+AUTO3_MARKE     = "VW"
+AUTO3_MODELL    = "Tiguan"
+AUTO3_PREIS_MIN = 20000
+AUTO3_PREIS_MAX = 25000
+AUTO3_KM_MAX    = 80000
+AUTO3_JAHR_MIN  = 2021
+AUTO3_JAHR_MAX  = 2026
+
+AUTO3_URLS = {
+    "AutoScout24": (
+        f"https://www.autoscout24.de/lst/volkswagen/tiguan"
+        f"?atype=C&cy=D&damaged_listing=exclude"
+        f"&fregfrom={AUTO3_JAHR_MIN}&fregto={AUTO3_JAHR_MAX}"
+        f"&kmto={AUTO3_KM_MAX}&pricefrom={AUTO3_PREIS_MIN}&priceto={AUTO3_PREIS_MAX}"
+        f"&sort=age&desc=0&size=20&page=1"
+    ),
+    "Mobile.de": (
+        f"https://suchen.mobile.de/fahrzeuge/search.html"
+        f"?dam=0&isSearchRequest=true&ms=25200%3B51%3B%3B&ref=dsp"
+        f"&s=Car&sb=rel&vc=Car"
+        f"&minFirstRegistrationDate={AUTO3_JAHR_MIN}-01-01"
+        f"&maxFirstRegistrationDate={AUTO3_JAHR_MAX}-12-31"
+        f"&minPrice={AUTO3_PREIS_MIN}&maxPrice={AUTO3_PREIS_MAX}"
+        f"&maxMileage={AUTO3_KM_MAX}"
+    ),
+    "eBay Kleinanzeigen": (
+        f"https://www.kleinanzeigen.de/s-vw-tiguan/langenargen/k0c216l8464r250"
+        f"?minPrice={AUTO3_PREIS_MIN}&maxPrice={AUTO3_PREIS_MAX}"
+    ),
+}
+
 # ─── Quellen ──────────────────────────────────────────────────────────────────
 EFT_RSS_FEEDS = [
     "https://www.escapefromtarkov.com/news/rss",  # Nur offizielle BSG Quelle
@@ -95,6 +197,7 @@ posted_codes       = load_json(POSTED_CODES_FILE, {})
 posted_patch_ids   = set(load_json(POSTED_PATCHES_FILE, []))
 posted_release_ids = set(load_json(POSTED_RELEASE_FILE, []))
 posted_arma_codes  = load_json(POSTED_ARMA_CODES_FILE, {})
+posted_autos       = load_json(POSTED_AUTOS_FILE, {})
 
 # ─── Hilfsfunktionen ──────────────────────────────────────────────────────────
 def ask_claude(prompt: str, max_tokens: int = 800) -> str:
@@ -565,6 +668,368 @@ async def verify_arma_koth_codes():
         save_json(POSTED_ARMA_CODES_FILE, posted_arma_codes)
         print(f"  → {len(to_delete)} KOTH Codes gelöscht")
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# AUTO-SUCHE (Skoda Kodiaq)
+# ══════════════════════════════════════════════════════════════════════════════
+async def scrape_autoscout24() -> list:
+    """AutoScout24 nach Skoda Kodiaq durchsuchen"""
+    results = []
+    url = AUTO_URLS["AutoScout24"]
+    text = await fetch_url(url)
+    if not text:
+        return results
+
+    # Claude analysiert die HTML-Seite
+    clean = clean_html(text, 4000)
+    result = ask_claude(
+        f"""Analysiere diese AutoScout24 Suchergebnisse und extrahiere alle Fahrzeugangebote.
+Suche nach: {AUTO_MARKE} {AUTO_MODELL}, {AUTO_PREIS_MIN}€-{AUTO_PREIS_MAX}€, max {AUTO_KM_MAX}km, {AUTO_JAHR_MIN}-{AUTO_JAHR_MAX}
+
+Antworte NUR mit JSON-Array ([] wenn keine gefunden):
+[{{
+  "titel": "Fahrzeugbezeichnung",
+  "preis": "Preis in Euro als Zahl",
+  "km": "Kilometerstand als Zahl",
+  "jahr": "Baujahr als Zahl",
+  "beschreibung": "Kurze Beschreibung",
+  "url": "Link zum Angebot falls vorhanden"
+}}]
+
+Text: {clean}""", 1000
+    )
+    match = re.search(r'\[.*\]', result, re.DOTALL)
+    if match:
+        try:
+            items = json.loads(match.group())
+            for item in items:
+                item["quelle"] = "AutoScout24"
+            results.extend(items)
+        except:
+            pass
+    return results
+
+async def scrape_mobile_de() -> list:
+    """Mobile.de nach Skoda Kodiaq durchsuchen"""
+    results = []
+    url = AUTO_URLS["Mobile.de"]
+    text = await fetch_url(url)
+    if not text:
+        return results
+
+    clean = clean_html(text, 4000)
+    result = ask_claude(
+        f"""Analysiere diese Mobile.de Suchergebnisse und extrahiere alle Fahrzeugangebote.
+Suche nach: {AUTO_MARKE} {AUTO_MODELL}, {AUTO_PREIS_MIN}€-{AUTO_PREIS_MAX}€, max {AUTO_KM_MAX}km, {AUTO_JAHR_MIN}-{AUTO_JAHR_MAX}
+
+Antworte NUR mit JSON-Array ([] wenn keine):
+[{{
+  "titel": "Fahrzeugbezeichnung",
+  "preis": "Preis als Zahl",
+  "km": "Kilometerstand als Zahl",
+  "jahr": "Baujahr als Zahl",
+  "beschreibung": "Kurze Beschreibung",
+  "url": "Link zum Angebot"
+}}]
+
+Text: {clean}""", 1000
+    )
+    match = re.search(r'\[.*\]', result, re.DOTALL)
+    if match:
+        try:
+            items = json.loads(match.group())
+            for item in items:
+                item["quelle"] = "Mobile.de"
+            results.extend(items)
+        except:
+            pass
+    return results
+
+async def scrape_ebay_kleinanzeigen() -> list:
+    """eBay Kleinanzeigen nach Skoda Kodiaq durchsuchen"""
+    results = []
+    url = AUTO_URLS["eBay Kleinanzeigen"]
+    text = await fetch_url(url)
+    if not text:
+        return results
+
+    clean = clean_html(text, 4000)
+    result = ask_claude(
+        f"""Analysiere diese eBay Kleinanzeigen Suchergebnisse und extrahiere alle passenden Angebote.
+Suche nach: {AUTO_MARKE} {AUTO_MODELL}, {AUTO_PREIS_MIN}€-{AUTO_PREIS_MAX}€, max {AUTO_KM_MAX}km, {AUTO_JAHR_MIN}-{AUTO_JAHR_MAX}
+
+Antworte NUR mit JSON-Array ([] wenn keine):
+[{{
+  "titel": "Fahrzeugbezeichnung",
+  "preis": "Preis als Zahl",
+  "km": "Kilometerstand als Zahl",
+  "jahr": "Baujahr als Zahl",
+  "beschreibung": "Kurze Beschreibung",
+  "url": "Link zum Angebot"
+}}]
+
+Text: {clean}""", 1000
+    )
+    match = re.search(r'\[.*\]', result, re.DOTALL)
+    if match:
+        try:
+            items = json.loads(match.group())
+            for item in items:
+                item["quelle"] = "eBay Kleinanzeigen"
+            results.extend(items)
+        except:
+            pass
+    return results
+
+def auto_id(item: dict) -> str:
+    """Eindeutige ID für ein Auto-Angebot"""
+    url = item.get("url", "")
+    if url:
+        return url
+    return f"{item.get('quelle','')}-{item.get('titel','')}-{item.get('preis','')}"
+
+def passes_filter(item: dict) -> bool:
+    """Prüft ob ein Auto die Suchfilter erfüllt"""
+    try:
+        preis = float(str(item.get("preis", 0)).replace(".", "").replace(",", "").replace("€", "").strip())
+        km = float(str(item.get("km", 0)).replace(".", "").replace(",", "").replace("km", "").strip())
+        jahr = int(str(item.get("jahr", 0)).strip())
+        if preis < AUTO_PREIS_MIN or preis > AUTO_PREIS_MAX:
+            return False
+        if km > AUTO_KM_MAX:
+            return False
+        if jahr < AUTO_JAHR_MIN or jahr > AUTO_JAHR_MAX:
+            return False
+        return True
+    except:
+        return True  # Im Zweifel posten
+
+# Anhängerkupplung – diese Wörter müssen in der Beschreibung vorkommen
+AHK_WOERTER = [
+    "anhängerkupplung", "ahk", "anhängerbetrieb", "anhängelast",
+    "zulässige anhängelast", "gebremste anhängelast", "trailer hitch",
+]
+
+# Mindestzuglast in kg
+AHK_MIN_ZUGLAST = 2000
+
+# Nur Deutschland
+NUR_DEUTSCHLAND = True
+
+# Wörter die auf Unfälle oder Probleme hinweisen → Auto wird AUSGESCHLOSSEN
+AUSSCHLUSS_WOERTER = [
+    # Unfälle
+    "unfall", "unfallschaden", "unfallwagen", "crash", "kollision", "beschädigt",
+    "delle", "dellen", "beule", "beulen", "eingedellt",
+    # Lack/Karosserie
+    "lackschaden", "kratzer", "kratzerchen", "steinschlag", "rost", "rostschäden",
+    "durchgerostet", "roststellen", "korrosion",
+    # Motor/Technik
+    "motorschaden", "getriebeschaden", "defekt", "reparaturbedürftig",
+    "reparatur nötig", "bastlerfahrzeug", "bastler", "ersatzteile",
+    "getriebeprobleme", "motorprobleme", "ölverlust", "raucht",
+    # Sonstiges
+    "totalschaden", "gutachten", "wertgutachten", "sachverständiger",
+    "versicherungsschaden", "hagelschaden", "wasserschaden", "brandschaden",
+    "als ersatzteilträger", "ersatzteilträger", "nicht fahrbereit",
+    "nicht angemeldet", "tüv abgelaufen",
+]
+
+def ist_unfallfrei(beschreibung: str) -> tuple:
+    """Prüft ob ein Auto unfallfrei und problemlos ist. Gibt (True/False, Grund) zurück."""
+    text = beschreibung.lower()
+    for wort in AUSSCHLUSS_WOERTER:
+        if wort in text:
+            return False, wort
+    return True, ""
+
+def hat_ahk(beschreibung: str, zuglast: int) -> tuple:
+    """Prüft ob ein Auto eine AHK hat und mindestens die gewünschte Zuglast."""
+    text = beschreibung.lower()
+
+    # Prüfen ob AHK erwähnt wird
+    ahk_gefunden = any(wort in text for wort in AHK_WOERTER)
+    if not ahk_gefunden:
+        return False, "Keine Anhängerkupplung erwähnt"
+
+    # Zuglast aus Text extrahieren (z.B. "2000 kg", "2.000 kg", "2500kg")
+    zuglast_matches = re.findall(r"(\d[\d.,]*)\s*kg", text)
+    for match in zuglast_matches:
+        try:
+            wert = float(match.replace(".", "").replace(",", "."))
+            if wert >= zuglast:
+                return True, f"{int(wert)} kg"
+        except:
+            pass
+
+    # AHK erwähnt aber keine Zuglast gefunden → Claude soll entscheiden
+    return True, "AHK vorhanden (Zuglast nicht angegeben)"
+
+async def scrape_auto(marke, modell, preis_min, preis_max, km_max, jahr_min, jahr_max, urls) -> list:
+    """Generische Funktion um ein Auto auf allen Plattformen zu suchen – nur unfallfreie!"""
+    results = []
+    for quelle, url in urls.items():
+        text = await fetch_url(url)
+        if not text:
+            continue
+        clean = clean_html(text, 4000)
+        result = ask_claude(
+            f"Analysiere diese {quelle} Suchergebnisse. Extrahiere alle {marke} {modell} Angebote.\n"
+            f"Filter: {preis_min}€-{preis_max}€, max {km_max}km, {jahr_min}-{jahr_max}\n"
+            f"NUR Fahrzeuge aus DEUTSCHLAND aufnehmen (kein Ausland)!\n"
+            f"NUR unfallfreie Fahrzeuge OHNE Schäden/Probleme aufnehmen!\n"
+            f"NUR Fahrzeuge MIT Anhängerkupplung (AHK) und mind. {AHK_MIN_ZUGLAST}kg Zuglast aufnehmen!\n"
+            "Antworte NUR mit JSON-Array ([] wenn keine):\n"
+            '[{"titel":"...","preis":12345,"km":50000,"jahr":2021,"beschreibung":"Vollständige Beschreibung","unfallfrei":true,"ahk":true,"zuglast":2000,"standort":"Stadt, Deutschland","url":"..."}]\n\n'
+            f"Text: {clean}", 1000
+        )
+        match = re.search(r'\[.*\]', result, re.DOTALL)
+        if match:
+            try:
+                items = json.loads(match.group())
+                for item in items:
+                    # Claude-Filter: unfallfrei=false → überspringen
+                    if item.get("unfallfrei") == False:
+                        print(f"  ⏭️ Übersprungen (Claude: nicht unfallfrei): {item.get('titel','')}")
+                        continue
+                    # Keyword-Filter: Ausschlusswörter in Beschreibung
+                    beschr = item.get("beschreibung", "") + " " + item.get("titel", "")
+                    ok, grund = ist_unfallfrei(beschr)
+                    if not ok:
+                        print(f"  ⏭️ Übersprungen (Keyword '{grund}'): {item.get('titel','')}")
+                        continue
+
+                    # AHK-Filter: Claude sagt kein AHK → überspringen
+                    if item.get("ahk") == False:
+                        print(f"  ⏭️ Übersprungen (Claude: kein AHK): {item.get('titel','')}")
+                        continue
+
+                    # Deutschland-Check: Ausländische Standorte filtern
+                    ausland_keywords = ["österreich", "schweiz", "niederlande", "belgien", "frankreich",
+                                       "italien", "spanien", "polen", "tschechien", "ungarn", "nl", "at", "ch"]
+                    standort = item.get("standort", "").lower()
+                    if any(k in standort for k in ausland_keywords):
+                        print(f"  ⏭️ Übersprungen (Ausland: {standort}): {item.get('titel','')}")
+                        continue
+
+                    # AHK Keyword-Check
+                    ahk_ok, ahk_info = hat_ahk(beschr, AHK_MIN_ZUGLAST)
+                    if not ahk_ok:
+                        print(f"  ⏭️ Übersprungen ({ahk_info}): {item.get('titel','')}")
+                        continue
+
+                    item["ahk_info"] = ahk_info
+                    item["quelle"] = quelle
+                    item["auto"] = f"{marke} {modell}"
+                    results.extend([item])
+            except:
+                pass
+        await asyncio.sleep(2)
+    return results
+
+def passes_filter_generic(item, preis_min, preis_max, km_max, jahr_min, jahr_max) -> bool:
+    try:
+        preis = float(str(item.get("preis", 0)).replace(".", "").replace(",", "").replace("€", "").strip())
+        km = float(str(item.get("km", 0)).replace(".", "").replace(",", "").replace("km", "").strip())
+        jahr = int(str(item.get("jahr", 0)).strip())
+        if preis and (preis < preis_min or preis > preis_max): return False
+        if km and km > km_max: return False
+        if jahr and (jahr < jahr_min or jahr > jahr_max): return False
+        return True
+    except:
+        return True
+
+@tasks.loop(minutes=AUTO_CHECK_INTERVAL)
+async def check_autos():
+    global posted_autos
+    print(f"🚗 Auto-Suche ({datetime.now().strftime('%H:%M')})")
+    try:
+        # Alle Autos und Quellen durchsuchen
+        all_results = []
+
+        # Skoda Kodiaq
+        all_results.extend(await scrape_auto(
+            AUTO_MARKE, AUTO_MODELL,
+            AUTO_PREIS_MIN, AUTO_PREIS_MAX, AUTO_KM_MAX, AUTO_JAHR_MIN, AUTO_JAHR_MAX,
+            AUTO_URLS
+        ))
+
+        # VW Touareg
+        all_results.extend(await scrape_auto(
+            AUTO2_MARKE, AUTO2_MODELL,
+            AUTO2_PREIS_MIN, AUTO2_PREIS_MAX, AUTO2_KM_MAX, AUTO2_JAHR_MIN, AUTO2_JAHR_MAX,
+            AUTO2_URLS
+        ))
+
+        # VW Tiguan
+        all_results.extend(await scrape_auto(
+            AUTO3_MARKE, AUTO3_MODELL,
+            AUTO3_PREIS_MIN, AUTO3_PREIS_MAX, AUTO3_KM_MAX, AUTO3_JAHR_MIN, AUTO3_JAHR_MAX,
+            AUTO3_URLS
+        ))
+
+        count = 0
+        for item in all_results:
+            aid = auto_id(item)
+            if aid in posted_autos:
+                continue
+            # Filter je nach Fahrzeug
+            auto_label = item.get("auto", f"{AUTO_MARKE} {AUTO_MODELL}")
+            if AUTO3_MODELL in auto_label:
+                if not passes_filter_generic(item, AUTO3_PREIS_MIN, AUTO3_PREIS_MAX, AUTO3_KM_MAX, AUTO3_JAHR_MIN, AUTO3_JAHR_MAX):
+                    continue
+            elif AUTO2_MODELL in auto_label:
+                if not passes_filter_generic(item, AUTO2_PREIS_MIN, AUTO2_PREIS_MAX, AUTO2_KM_MAX, AUTO2_JAHR_MIN, AUTO2_JAHR_MAX):
+                    continue
+            else:
+                if not passes_filter_generic(item, AUTO_PREIS_MIN, AUTO_PREIS_MAX, AUTO_KM_MAX, AUTO_JAHR_MIN, AUTO_JAHR_MAX):
+                    continue
+
+            quelle = item.get("quelle", "Unbekannt")
+            preis = item.get("preis", "?")
+            km = item.get("km", "?")
+            jahr = item.get("jahr", "?")
+            titel = item.get("titel", "Skoda Kodiaq")
+            beschreibung = item.get("beschreibung", "")
+            url = item.get("url", "")
+
+            # Farbe je nach Quelle
+            farbe = {
+                "AutoScout24": discord.Color.orange(),
+                "Mobile.de": discord.Color.blue(),
+                "eBay Kleinanzeigen": discord.Color.green()
+            }.get(quelle, discord.Color.gold())
+
+            embed = discord.Embed(
+                title=f"🚗 {titel}",
+                url=url if url else None,
+                description=beschreibung or f"{AUTO_MARKE} {AUTO_MODELL} gefunden!",
+                color=farbe,
+                timestamp=datetime.now()
+            )
+            embed.add_field(name="💶 Preis", value=f"{preis:,}€".replace(",", ".") if isinstance(preis, (int, float)) else f"{preis}€", inline=True)
+            embed.add_field(name="📍 Kilometerstand", value=f"{km:,} km".replace(",", ".") if isinstance(km, (int, float)) else f"{km} km", inline=True)
+            embed.add_field(name="📅 Baujahr", value=str(jahr), inline=True)
+            standort = item.get("standort", "Deutschland")
+            embed.add_field(name="📍 Standort", value=standort, inline=True)
+            embed.add_field(name="🔗 AHK", value=f"✅ {item.get('ahk_info', 'Vorhanden')}", inline=True)
+            embed.add_field(name="🌐 Quelle", value=quelle, inline=True)
+            if url:
+                embed.add_field(name="🔗 Link", value=f"[Zum Angebot]({url})", inline=True)
+            embed.set_footer(text=f"{item.get('auto','Auto')} • Unfallfrei • AHK min. {AHK_MIN_ZUGLAST}kg • 🇩🇪 Deutschland • eBay: 250km um Langenargen")
+
+            for guild in bot.guilds:
+                await post_to_channel(guild, AUTO_CHANNEL, embed)
+
+            posted_autos[aid] = {"titel": titel, "quelle": quelle, "found_at": datetime.now().isoformat()}
+            count += 1
+            await asyncio.sleep(2)
+
+        save_json(POSTED_AUTOS_FILE, posted_autos)
+        print(f"  → {count} neue Autos gefunden")
+    except Exception as e:
+        print(f"Auto-Suche Fehler: {e}")
+
 # ══════════════════════════════════════════════════════════════════════════════
 # CLAUDE AUFGABEN TOOLS
 # ══════════════════════════════════════════════════════════════════════════════
@@ -596,6 +1061,7 @@ TOOLS = [
     {"name": "check_patchnotes_now", "description": "EFT Patchnotes sofort prüfen", "input_schema": {"type": "object", "properties": {}}},
     {"name": "check_release_now", "description": "EFT Release-Info sofort prüfen", "input_schema": {"type": "object", "properties": {}}},
     {"name": "check_arma_codes_now", "description": "Arma KOTH Codes sofort suchen", "input_schema": {"type": "object", "properties": {}}},
+    {"name": "check_autos_now", "description": "Sofort nach Skoda Kodiaq suchen", "input_schema": {"type": "object", "properties": {}}},
 ]
 
 async def execute_tool(tool_name: str, tool_input: dict, guild: discord.Guild, ctx_channel) -> str:
@@ -666,6 +1132,8 @@ async def execute_tool(tool_name: str, tool_input: dict, guild: discord.Guild, c
             await check_eft_release(); return "✅ Release-Check ausgeführt."
         elif tool_name == "check_arma_codes_now":
             await check_arma_koth_codes(); return "✅ Arma KOTH Code-Check ausgeführt."
+        elif tool_name == "check_autos_now":
+            await check_autos(); return "✅ Auto-Suche ausgeführt."
         else:
             return f"❌ Unbekanntes Tool: {tool_name}"
     except discord.Forbidden:
@@ -706,7 +1174,8 @@ async def on_ready():
     print(f"✅ Bot online: {bot.user}")
     for fn in [check_eft_news, check_eft_patchnotes, check_eft_release,
                check_eft_codes, verify_eft_codes,
-               check_arma_koth_codes, verify_arma_koth_codes]:
+               check_arma_koth_codes, verify_arma_koth_codes,
+               check_autos]:
         if not fn.is_running():
             fn.start()
     print("🚀 Alle Tasks gestartet!")
@@ -754,6 +1223,12 @@ async def cmd_patches(ctx):
 async def cmd_release(ctx):
     msg = await ctx.reply("🚀 Suche Release-Info...")
     await check_eft_release()
+    await msg.edit(content="✅ Erledigt!")
+
+@bot.command(name="autos")
+async def cmd_autos(ctx):
+    msg = await ctx.reply("🚗 Suche Skoda Kodiaq Angebote...")
+    await check_autos()
     await msg.edit(content="✅ Erledigt!")
 
 @bot.command(name="arma_codes")
