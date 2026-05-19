@@ -942,6 +942,78 @@ def passes_filter_generic(item, preis_min, preis_max, km_max, jahr_min, jahr_max
     except:
         return True
 
+async def check_auto_still_available(url: str) -> bool:
+    """Prüft ob ein Auto-Inserat noch verfügbar ist"""
+    if not url or not url.startswith("http"):
+        return True  # Kein URL → behalten
+
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    try:
+        async with aiohttp.ClientSession(headers=headers) as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status == 404:
+                    return False
+                if resp.status == 200:
+                    text = await resp.text()
+                    # Typische Texte wenn Inserat nicht mehr verfügbar
+                    nicht_mehr_da = [
+                        "inserat nicht mehr verfügbar", "anzeige nicht mehr verfügbar",
+                        "dieses inserat wurde", "bereits verkauft", "nicht mehr aktiv",
+                        "angebot nicht mehr", "leider nicht mehr", "this listing",
+                        "no longer available", "sold", "verkauft", "gelöscht",
+                        "404", "nicht gefunden"
+                    ]
+                    text_lower = text.lower()
+                    if any(phrase in text_lower for phrase in nicht_mehr_da):
+                        return False
+                return True
+    except:
+        return True  # Im Zweifel behalten
+
+@tasks.loop(minutes=60)  # Jede Stunde prüfen
+async def verify_autos():
+    """Prüft ob gepostete Autos noch verfügbar sind – löscht abgelaufene"""
+    global posted_autos
+    print(f"🔍 Auto-Verfügbarkeits-Check ({datetime.now().strftime('%H:%M')})")
+    to_delete = []
+
+    for aid, data in posted_autos.items():
+        url = data.get("url", "")
+        titel = data.get("titel", "Unbekannt")
+
+        still_available = await check_auto_still_available(url)
+
+        if not still_available:
+            print(f"  🗑️ Inserat nicht mehr verfügbar: {titel}")
+            try:
+                guild = bot.get_guild(data.get("guild_id"))
+                channel = guild.get_channel(data.get("channel_id")) if guild else None
+                if channel:
+                    msg = await channel.fetch_message(data.get("message_id"))
+                    embed = discord.Embed(
+                        title=f"❌ Nicht mehr verfügbar: ~~{titel}~~",
+                        description="Dieses Inserat wurde entfernt oder das Auto wurde verkauft.",
+                        color=discord.Color.red(),
+                        timestamp=datetime.now()
+                    )
+                    embed.set_footer(text="Automatisch erkannt – Inserat nicht mehr verfügbar")
+                    await msg.edit(embed=embed)
+                    await asyncio.sleep(3)
+                    await msg.delete()
+            except Exception as e:
+                print(f"  Lösch-Fehler: {e}")
+            to_delete.append(aid)
+
+        await asyncio.sleep(2)
+
+    for aid in to_delete:
+        del posted_autos[aid]
+    if to_delete:
+        save_json(POSTED_AUTOS_FILE, posted_autos)
+        print(f"  → {len(to_delete)} nicht mehr verfügbare Inserate gelöscht")
+    else:
+        print(f"  → Alle Inserate noch verfügbar")
+
 @tasks.loop(minutes=AUTO_CHECK_INTERVAL)
 async def check_autos():
     global posted_autos
@@ -1022,9 +1094,17 @@ async def check_autos():
             embed.set_footer(text=f"{item.get('auto','Auto')} • Unfallfrei • AHK min. {AHK_MIN_ZUGLAST}kg • 🇩🇪 Deutschland • eBay: 250km um Langenargen")
 
             for guild in bot.guilds:
-                await post_to_channel(guild, AUTO_CHANNEL, embed)
-
-            posted_autos[aid] = {"titel": titel, "quelle": quelle, "found_at": datetime.now().isoformat()}
+                msg = await post_to_channel(guild, AUTO_CHANNEL, embed)
+                if msg:
+                    posted_autos[aid] = {
+                        "titel": titel,
+                        "quelle": quelle,
+                        "url": item.get("url", ""),
+                        "guild_id": guild.id,
+                        "channel_id": msg.channel.id,
+                        "message_id": msg.id,
+                        "found_at": datetime.now().isoformat()
+                    }
             count += 1
             await asyncio.sleep(2)
 
@@ -1178,7 +1258,7 @@ async def on_ready():
     for fn in [check_eft_news, check_eft_patchnotes, check_eft_release,
                check_eft_codes, verify_eft_codes,
                check_arma_koth_codes, verify_arma_koth_codes,
-               check_autos]:
+               check_autos, verify_autos]:
         if not fn.is_running():
             fn.start()
     print("🚀 Alle Tasks gestartet!")
