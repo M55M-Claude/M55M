@@ -12,6 +12,7 @@ from datetime import datetime
 # ─── Konfiguration ────────────────────────────────────────────────────────────
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "DEIN_DISCORD_TOKEN_HIER")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "DEIN_ANTHROPIC_KEY_HIER")
+APIPY_TOKEN = os.getenv("APIFY_TOKEN", "")
 ADMIN_USER_IDS = []
 
 # Channel Namen
@@ -842,69 +843,153 @@ def hat_ahk(beschreibung: str, zuglast: int) -> tuple:
     return True, "AHK vorhanden (Zuglast nicht angegeben)"
 
 async def suche_einzelne_inserate(marke: str, modell: str, preis_min: int, preis_max: int, km_max: int, jahr_min: int, jahr_max: int) -> list:
-    """Sucht einzelne Inserate via Kleinanzeigen RSS-Feed"""
+    """Sucht einzelne Inserate via Apify AutoScout24 Scraper"""
+    if not APIPY_TOKEN:
+        print("  ❌ Kein Apify Token konfiguriert")
+        return []
+
     inserate = []
-    keywords = f"{marke}+{modell}".replace(" ", "+")
+    print(f"  🔍 Apify Suche: {marke} {modell}")
 
-    # Kleinanzeigen RSS Feed (250km um Langenargen)
-    slug = f"{marke.lower()}-{modell.lower()}".replace(" ", "-")
-    rss_urls = [
-        f"https://www.kleinanzeigen.de/s-{slug}/k0c216.rss?minPrice={preis_min}&maxPrice={preis_max}",
-        f"https://www.kleinanzeigen.de/s-{slug}/langenargen/k0c216l8464r250.rss",
-        f"https://www.kleinanzeigen.de/s-{marke.lower()}/{modell.lower()}/k0c216.rss?minPrice={preis_min}&maxPrice={preis_max}",
-    ]
+    try:
+        # Apify Actor starten
+        run_url = "https://api.apify.com/v2/acts/kxvqbfZknFYLcVyfx/run-sync-get-dataset-items"
+        payload = {
+            "search": f"{marke} {modell}",
+            "maxItems": 20,
+            "country": "DE",
+            "minPrice": preis_min,
+            "maxPrice": preis_max,
+            "maxMileage": km_max,
+            "minYear": jahr_min,
+            "maxYear": jahr_max,
+            "damageCondition": "UNREPAIRED_DAMAGE_ABSENT",  # Nur unfallfreie
+        }
+        headers = {"Authorization": f"Bearer {APIPY_TOKEN}"}
 
-    for rss_url in rss_urls:
-        print(f"  🔗 RSS: {rss_url[:80]}")
-        text = await fetch_url(rss_url)
-        if not text:
-            print(f"  ❌ Kein Text zurück")
-            continue
-        print(f"  📄 {len(text)} Zeichen, RSS: {'ja' if '<rss' in text.lower() or '<feed' in text.lower() else 'nein'}")
-        print(f"  Preview: {text[:200]}")
-        if "<rss" not in text.lower() and "<feed" not in text.lower():
-            continue
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                run_url,
+                json=payload,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=120)
+            ) as resp:
+                print(f"  HTTP {resp.status} von Apify")
+                if resp.status == 200:
+                    data = await resp.json()
+                    print(f"  ✅ {len(data)} Ergebnisse von Apify")
+                    for car in data:
+                        titel = car.get("title", f"{marke} {modell}")
+                        preis = car.get("price", 0)
+                        km = car.get("mileage", 0)
+                        jahr = car.get("firstRegistration", "")[:4] if car.get("firstRegistration") else 0
+                        link = car.get("url", car.get("link", ""))
+                        beschr = car.get("description", "")
+                        standort = car.get("location", {})
+                        if isinstance(standort, dict):
+                            standort = standort.get("city", "Deutschland")
 
-        items = parse_rss(text, 20)
-        print(f"  📋 {len(items)} Inserate via RSS für {marke} {modell}")
+                        # Unfallfrei-Check
+                        ok, grund = ist_unfallfrei(titel + " " + beschr)
+                        if not ok:
+                            print(f"  ⏭️ {grund}: {titel[:40]}")
+                            continue
 
-        for item in items:
-            titel = item.get("title", "")
-            link = item.get("link", "")
-            beschr = item.get("description", "")
+                        inserate.append({
+                            "titel": titel,
+                            "link": link,
+                            "beschreibung": beschr[:300],
+                            "preis": preis,
+                            "km": km,
+                            "jahr": jahr,
+                            "standort": standort,
+                            "auto": f"{marke} {modell}"
+                        })
+                else:
+                    txt = await resp.text()
+                    print(f"  Apify Fehler: {txt[:200]}")
+    except Exception as e:
+        print(f"  Apify Exception: {e}")
 
-            if not link:
-                continue
+    return inserate
 
-            # Preis aus Titel/Beschreibung extrahieren
-            preis_match = re.search(r'(\d[\d.,]+)\s*€', titel + " " + beschr)
-            preis_val = 0
-            if preis_match:
-                try:
-                    preis_val = float(preis_match.group(1).replace(".", "").replace(",", "."))
-                except:
-                    pass
+async def suche_mobile_de(marke: str, modell: str, preis_min: int, preis_max: int, km_max: int, jahr_min: int, jahr_max: int) -> list:
+    """Sucht einzelne Inserate via Apify Mobile.de Scraper"""
+    if not APIPY_TOKEN:
+        return []
 
-            # Preis-Filter
-            if preis_val and (preis_val < preis_min or preis_val > preis_max):
-                continue
+    inserate = []
+    print(f"  🔍 Mobile.de Suche: {marke} {modell}")
 
-            # Unfallfrei-Check
-            ok, grund = ist_unfallfrei(titel + " " + beschr)
-            if not ok:
-                print(f"  ⏭️ Schaden gefunden ({grund}): {titel[:50]}")
-                continue
+    try:
+        # Mobile.de Such-URL mit Filtern bauen
+        marke_map = {"Skoda": "74", "VW": "25200", "Volkswagen": "25200"}
+        modell_map = {
+            "Kodiaq": "52247", "Touareg": "51", "Tiguan": "21"
+        }
+        marke_id = marke_map.get(marke, "")
+        modell_id = modell_map.get(modell, "")
 
-            inserate.append({
-                "titel": titel,
-                "link": link,
-                "beschreibung": re.sub(r'<[^>]+>', '', beschr)[:300],
-                "preis": preis_val,
-                "auto": f"{marke} {modell}"
-            })
+        search_url = (
+            f"https://suchen.mobile.de/fahrzeuge/search.html?"
+            f"dam=false&isSearchRequest=true&ref=quickSearch&s=Car&sb=rel&vc=Car"
+            f"&minFirstRegistrationDate={jahr_min}-01-01"
+            f"&maxFirstRegistrationDate={jahr_max}-12-31"
+            f"&minPrice={preis_min}&maxPrice={preis_max}"
+            f"&maxMileage={km_max}"
+            f"&damageUnrepaired=WITHOUT_DAMAGE_UNREPAIRED"
+        )
+        if marke_id and modell_id:
+            search_url += f"&makeModelVariant1.makeId={marke_id}&makeModelVariant1.modelId={modell_id}"
 
-        if inserate:
-            break  # Erste erfolgreiche URL reicht
+        payload = {
+            "searchUrl": search_url,
+            "maxItems": 20,
+        }
+        headers = {"Authorization": f"Bearer {APIPY_TOKEN}"}
+        run_url = "https://api.apify.com/v2/acts/ivanvs~mobile-de-scraper/run-sync-get-dataset-items"
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                run_url,
+                json=payload,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=120)
+            ) as resp:
+                print(f"  HTTP {resp.status} von Mobile.de Apify")
+                if resp.status == 200:
+                    data = await resp.json()
+                    print(f"  ✅ {len(data)} Ergebnisse von Mobile.de")
+                    for car in data:
+                        titel = car.get("title", f"{marke} {modell}")
+                        preis = car.get("price", 0)
+                        km = car.get("mileage", 0)
+                        jahr = str(car.get("firstRegistration", ""))[:4]
+                        link = car.get("url", "")
+                        beschr = car.get("description", "")
+                        standort = car.get("seller", {}).get("city", "Deutschland") if isinstance(car.get("seller"), dict) else "Deutschland"
+
+                        ok, grund = ist_unfallfrei(titel + " " + beschr)
+                        if not ok:
+                            print(f"  ⏭️ {grund}: {titel[:40]}")
+                            continue
+
+                        inserate.append({
+                            "titel": titel,
+                            "link": link,
+                            "beschreibung": beschr[:300],
+                            "preis": preis,
+                            "km": km,
+                            "jahr": jahr,
+                            "standort": standort,
+                            "auto": f"{marke} {modell}",
+                            "quelle": "Mobile.de"
+                        })
+                else:
+                    txt = await resp.text()
+                    print(f"  Mobile.de Apify Fehler: {txt[:200]}")
+    except Exception as e:
+        print(f"  Mobile.de Exception: {e}")
 
     return inserate
 
@@ -976,24 +1061,35 @@ async def check_autos():
 
         neu = 0
         for marke, modell, p_min, p_max, km_max, j_min, j_max in alle_autos:
+            # AutoScout24 via Apify
             inserate = await suche_einzelne_inserate(marke, modell, p_min, p_max, km_max, j_min, j_max)
+            # Mobile.de via Apify
+            inserate += await suche_mobile_de(marke, modell, p_min, p_max, km_max, j_min, j_max)
+
             for ins in inserate:
                 aid = ins["link"]
                 if aid in posted_autos:
                     continue
 
                 preis_str = f"{int(ins['preis']):,}€".replace(",", ".") if ins["preis"] else "Preis anfragen"
+                km_str = f"{int(ins.get('km', 0)):,} km".replace(",", ".") if ins.get("km") else "k.A."
+                jahr_str = str(ins.get("jahr", "k.A."))
+                standort_str = ins.get("standort", "Deutschland")
+
                 embed = discord.Embed(
                     title=f"🚗 {ins['titel'][:200]}",
-                    url=ins["link"],
-                    description=ins["beschreibung"] or "Klicke für mehr Details.",
+                    url=ins["link"] if ins["link"] else None,
+                    description=ins["beschreibung"] or "Klicke auf den Titel für mehr Details.",
                     color=discord.Color.green(),
                     timestamp=datetime.now()
                 )
                 embed.add_field(name="💶 Preis", value=preis_str, inline=True)
+                embed.add_field(name="📍 KM", value=km_str, inline=True)
+                embed.add_field(name="📅 Baujahr", value=jahr_str, inline=True)
+                embed.add_field(name="📌 Standort", value=standort_str, inline=True)
                 embed.add_field(name="🚘 Modell", value=f"{marke} {modell}", inline=True)
-                embed.add_field(name="🌐 Quelle", value="Kleinanzeigen.de", inline=True)
-                embed.set_footer(text=f"Unfallfrei • 250km um Langenargen • {p_min:,}€-{p_max:,}€".replace(",","."))
+                embed.add_field(name="🌐 Quelle", value=ins.get("quelle", "AutoScout24"), inline=True)
+                embed.set_footer(text=f"Unfallfrei • Deutschland • {p_min:,}€-{p_max:,}€".replace(",","."))
 
                 for guild in bot.guilds:
                     msg = await post_to_channel(guild, AUTO_CHANNEL, embed)
