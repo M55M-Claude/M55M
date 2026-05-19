@@ -848,6 +848,7 @@ async def post_auto_suche_links():
             "name": f"{AUTO_MARKE} {AUTO_MODELL}",
             "emoji": "🚙",
             "as24": f"https://www.autoscout24.de/lst/skoda/kodiaq?atype=C&cy=D&damaged_listing=exclude&fregfrom={AUTO_JAHR_MIN}&fregto={AUTO_JAHR_MAX}&kmto={AUTO_KM_MAX}&pricefrom={AUTO_PREIS_MIN}&priceto={AUTO_PREIS_MAX}&sort=age&desc=0",
+            "mobile": f"https://suchen.mobile.de/fahrzeuge/search.html?makeModelVariant1.makeId=74&makeModelVariant1.modelId=3&minFirstRegistrationDate={AUTO_JAHR_MIN}-01-01&maxFirstRegistrationDate={AUTO_JAHR_MAX}-12-31&minPrice={AUTO_PREIS_MIN}&maxPrice={AUTO_PREIS_MAX}&maxMileage={AUTO_KM_MAX}&damageUnrepaired=WITHOUT_DAMAGE_UNREPAIRED&lang=de",
             "ebay": f"https://www.kleinanzeigen.de/s-skoda-kodiaq/langenargen/k0c216l8464r250?minPrice={AUTO_PREIS_MIN}&maxPrice={AUTO_PREIS_MAX}",
             "filter": f"{AUTO_PREIS_MIN:,}€-{AUTO_PREIS_MAX:,}€ • max {AUTO_KM_MAX:,}km • {AUTO_JAHR_MIN}-{AUTO_JAHR_MAX}".replace(",",".")
         },
@@ -855,6 +856,7 @@ async def post_auto_suche_links():
             "name": f"{AUTO2_MARKE} {AUTO2_MODELL}",
             "emoji": "🚗",
             "as24": f"https://www.autoscout24.de/lst/volkswagen/touareg?atype=C&cy=D&damaged_listing=exclude&fregfrom={AUTO2_JAHR_MIN}&fregto={AUTO2_JAHR_MAX}&kmto={AUTO2_KM_MAX}&pricefrom={AUTO2_PREIS_MIN}&priceto={AUTO2_PREIS_MAX}&sort=age&desc=0",
+            "mobile": f"https://suchen.mobile.de/fahrzeuge/search.html?makeModelVariant1.makeId=25200&makeModelVariant1.modelId=51&minFirstRegistrationDate={AUTO2_JAHR_MIN}-01-01&maxFirstRegistrationDate={AUTO2_JAHR_MAX}-12-31&minPrice={AUTO2_PREIS_MIN}&maxPrice={AUTO2_PREIS_MAX}&maxMileage={AUTO2_KM_MAX}&damageUnrepaired=WITHOUT_DAMAGE_UNREPAIRED&lang=de",
             "ebay": f"https://www.kleinanzeigen.de/s-vw-touareg/langenargen/k0c216l8464r250?minPrice={AUTO2_PREIS_MIN}&maxPrice={AUTO2_PREIS_MAX}",
             "filter": f"{AUTO2_PREIS_MIN:,}€-{AUTO2_PREIS_MAX:,}€ • max {AUTO2_KM_MAX:,}km • ab {AUTO2_JAHR_MIN}".replace(",",".")
         },
@@ -862,6 +864,7 @@ async def post_auto_suche_links():
             "name": f"{AUTO3_MARKE} {AUTO3_MODELL}",
             "emoji": "🚕",
             "as24": f"https://www.autoscout24.de/lst/volkswagen/tiguan?atype=C&cy=D&damaged_listing=exclude&fregfrom={AUTO3_JAHR_MIN}&fregto={AUTO3_JAHR_MAX}&kmto={AUTO3_KM_MAX}&pricefrom={AUTO3_PREIS_MIN}&priceto={AUTO3_PREIS_MAX}&sort=age&desc=0",
+            "mobile": f"https://suchen.mobile.de/fahrzeuge/search.html?makeModelVariant1.makeId=25200&makeModelVariant1.modelId=21&minFirstRegistrationDate={AUTO3_JAHR_MIN}-01-01&maxFirstRegistrationDate={AUTO3_JAHR_MAX}-12-31&minPrice={AUTO3_PREIS_MIN}&maxPrice={AUTO3_PREIS_MAX}&maxMileage={AUTO3_KM_MAX}&damageUnrepaired=WITHOUT_DAMAGE_UNREPAIRED&lang=de",
             "ebay": f"https://www.kleinanzeigen.de/s-vw-tiguan/langenargen/k0c216l8464r250?minPrice={AUTO3_PREIS_MIN}&maxPrice={AUTO3_PREIS_MAX}",
             "filter": f"{AUTO3_PREIS_MIN:,}€-{AUTO3_PREIS_MAX:,}€ • max {AUTO3_KM_MAX:,}km • ab {AUTO3_JAHR_MIN}".replace(",",".")
         },
