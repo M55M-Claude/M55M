@@ -854,16 +854,18 @@ async def suche_einzelne_inserate(marke: str, modell: str, preis_min: int, preis
     try:
         # Apify Actor starten
         run_url = "https://api.apify.com/v2/acts/kxvqbfZknFYLcVyfx/run-sync-get-dataset-items"
+        marke_slug = marke.lower().replace(" ", "-").replace("ü","ue").replace("ö","oe").replace("ä","ae")
+        modell_slug = modell.lower().replace(" ", "-").replace("ü","ue").replace("ö","oe").replace("ä","ae")
+        search_url = (
+            f"https://www.autoscout24.de/lst/{marke_slug}/{modell_slug}"
+            f"?atype=C&cy=D&damaged_listing=exclude"
+            f"&fregfrom={jahr_min}&fregto={jahr_max}"
+            f"&kmto={km_max}&pricefrom={preis_min}&priceto={preis_max}"
+            f"&sort=age&desc=0&size=20"
+        )
         payload = {
-            "search": f"{marke} {modell}",
+            "startUrls": [{"url": search_url}],
             "maxItems": 20,
-            "country": "DE",
-            "minPrice": preis_min,
-            "maxPrice": preis_max,
-            "maxMileage": km_max,
-            "minYear": jahr_min,
-            "maxYear": jahr_max,
-            "damageCondition": "UNREPAIRED_DAMAGE_ABSENT",  # Nur unfallfreie
         }
         headers = {"Authorization": f"Bearer {APIPY_TOKEN}"}
 
@@ -943,7 +945,7 @@ async def suche_mobile_de(marke: str, modell: str, preis_min: int, preis_max: in
             search_url += f"&makeModelVariant1.makeId={marke_id}&makeModelVariant1.modelId={modell_id}"
 
         payload = {
-            "searchUrl": search_url,
+            "startUrls": [{"url": search_url}],
             "maxItems": 20,
         }
         headers = {"Authorization": f"Bearer {APIPY_TOKEN}"}
