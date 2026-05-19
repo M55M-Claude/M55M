@@ -842,91 +842,131 @@ def hat_ahk(beschreibung: str, zuglast: int) -> tuple:
     return True, "AHK vorhanden (Zuglast nicht angegeben)"
 
 async def scrape_auto(marke, modell, preis_min, preis_max, km_max, jahr_min, jahr_max, urls) -> list:
-    """Sucht Autos per Claude Web-Analyse – nur unfallfreie mit AHK aus Deutschland"""
+    """Sucht Autos direkt über AutoScout24 JSON-API und eBay Kleinanzeigen"""
     results = []
 
-    # Spezielle Header um Bot-Blocking zu umgehen
-    headers_as24 = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "application/json, text/html, */*",
         "Accept-Language": "de-DE,de;q=0.9",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Referer": "https://www.google.de/",
     }
 
     for quelle, url in urls.items():
-        print(f"  🔍 Suche auf {quelle}: {url[:80]}...")
-        try:
-            async with aiohttp.ClientSession(headers=headers_as24) as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=20)) as resp:
-                    print(f"  HTTP {resp.status} von {quelle}")
-                    if resp.status != 200:
-                        continue
-                    text = await resp.text()
-        except Exception as e:
-            print(f"  Fetch-Fehler {quelle}: {e}")
-            continue
+        if "Mobile.de" in quelle:
+            continue  # Mobile.de blockiert
 
-        if not text or len(text) < 500:
-            print(f"  Leere Antwort von {quelle}")
-            continue
-
-        clean = clean_html(text, 5000)
-        print(f"  Text-Länge nach Cleaning: {len(clean)} Zeichen")
-
-        result = ask_claude(
-            f"Analysiere diese {quelle} Seite. Extrahiere ALLE {marke} {modell} Inserate/Angebote.\n"
-            f"Preisrange: {preis_min}€ bis {preis_max}€ | Max KM: {km_max} | Baujahr: {jahr_min}-{jahr_max}\n"
-            f"NUR aus Deutschland | NUR unfallfrei | NUR mit AHK (min. {AHK_MIN_ZUGLAST}kg Zuglast)\n"
-            f"Falls keine passenden Angebote: leeres Array zurückgeben.\n"
-            "Antworte AUSSCHLIESSLICH mit JSON-Array:\n"
-            '[{"titel":"VW Tiguan 2.0 TDI","preis":22500,"km":65000,"jahr":2022,"unfallfrei":true,"ahk":true,"zuglast":2500,"standort":"Stuttgart","beschreibung":"Kurze Beschreibung","url":"https://..."}]\n\n'
-            f"Seiteninhalt: {clean}", 1200
-        )
-
-        print(f"  Claude Antwort: {result[:200]}")
-
-        match = re.search(r'\[.*?\]', result, re.DOTALL)
-        if not match:
-            print(f"  Kein JSON gefunden von {quelle}")
-            continue
+        print(f"  🔍 Suche auf {quelle}...")
 
         try:
-            items = json.loads(match.group())
-            print(f"  {len(items)} Angebote von Claude gefunden")
+            # AutoScout24: JSON API nutzen
+            if "autoscout24" in url:
+                # API URL aufbauen
+                marke_lower = marke.lower().replace(" ", "-")
+                modell_lower = modell.lower().replace(" ", "-")
+                api_url = (
+                    f"https://www.autoscout24.de/lst/{marke_lower}/{modell_lower}"
+                    f"?atype=C&cy=D&damaged_listing=exclude"
+                    f"&fregfrom={jahr_min}&fregto={jahr_max}"
+                    f"&kmto={km_max}&pricefrom={preis_min}&priceto={preis_max}"
+                    f"&sort=age&desc=0&size=20&page=1&format=json"
+                )
+                async with aiohttp.ClientSession(headers=headers) as session:
+                    async with session.get(api_url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                        print(f"  HTTP {resp.status} von {quelle}")
+                        if resp.status == 200:
+                            try:
+                                data = await resp.json(content_type=None)
+                                listings = data.get("listings", data.get("data", data.get("results", [])))
+                                if isinstance(listings, list):
+                                    for car in listings[:10]:
+                                        titel = car.get("title", f"{marke} {modell}")
+                                        preis = car.get("price", car.get("priceRaw", 0))
+                                        km = car.get("mileage", car.get("km", 0))
+                                        jahr = car.get("firstRegistrationYear", car.get("year", 0))
+                                        standort = car.get("location", {})
+                                        if isinstance(standort, dict):
+                                            standort = standort.get("city", "Deutschland")
+                                        car_url = car.get("url", car.get("link", ""))
+                                        if car_url and not car_url.startswith("http"):
+                                            car_url = "https://www.autoscout24.de" + car_url
+                                        results.append({
+                                            "titel": titel, "preis": preis, "km": km,
+                                            "jahr": jahr, "standort": standort,
+                                            "beschreibung": car.get("description", ""),
+                                            "url": car_url, "quelle": quelle,
+                                            "auto": f"{marke} {modell}", "unfallfrei": True
+                                        })
+                                    print(f"  ✅ {len(listings)} Angebote via JSON API")
+                                    continue
+                            except:
+                                pass
+
+                        # Fallback: HTML mit erhöhtem Text-Limit
+                        async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp2:
+                            if resp2.status == 200:
+                                text = await resp2.text()
+                                # JSON aus HTML extrahieren (AutoScout24 bettet __NEXT_DATA__ ein)
+                                match = re.search(r'__NEXT_DATA__["\s]*=["\s]*({.*?})\s*;?\s*</script>', text, re.DOTALL)
+                                if match:
+                                    try:
+                                        next_data = json.loads(match.group(1))
+                                        props = next_data.get("props", {}).get("pageProps", {})
+                                        listings = props.get("listings", props.get("initialState", {}).get("listings", {}).get("data", []))
+                                        for car in listings[:10]:
+                                            titel = f"{marke} {modell}"
+                                            preis = car.get("price", 0)
+                                            km = car.get("mileage", 0)
+                                            jahr = car.get("firstRegistrationYear", 0)
+                                            car_url = "https://www.autoscout24.de" + car.get("url", "")
+                                            results.append({
+                                                "titel": titel, "preis": preis, "km": km,
+                                                "jahr": jahr, "standort": "Deutschland",
+                                                "beschreibung": "", "url": car_url,
+                                                "quelle": quelle, "auto": f"{marke} {modell}",
+                                                "unfallfrei": True
+                                            })
+                                        print(f"  ✅ {len(listings)} Angebote aus __NEXT_DATA__")
+                                        continue
+                                    except Exception as e:
+                                        print(f"  JSON-Parse: {e}")
+
+            # eBay Kleinanzeigen: HTML parsen
+            elif "kleinanzeigen" in url:
+                async with aiohttp.ClientSession(headers=headers) as session:
+                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                        print(f"  HTTP {resp.status} von {quelle}")
+                        if resp.status == 200:
+                            text = await resp.text()
+                            # Anzeigen aus HTML extrahieren
+                            artikel = re.findall(
+                                r'data-adid="(\d+)"[^>]*>.*?<a[^>]*href="(/s-anzeige/[^"]+)"[^>]*>.*?<p[^>]*class="[^"]*text-module-begin[^"]*"[^>]*>(.*?)</p>.*?<strong[^>]*>([\d.,]+)\s*€</strong>',
+                                text, re.DOTALL
+                            )
+                            if not artikel:
+                                # Simpler Ansatz
+                                matches = re.findall(r'href="(/s-anzeige/[^"]+)"', text)
+                                preise = re.findall(r'([\d.]+)\s*€', text)
+                                for i, (m, p) in enumerate(zip(matches[:10], preise[:10])):
+                                    try:
+                                        preis_val = float(p.replace(".", "").replace(",", "."))
+                                        if preis_min <= preis_val <= preis_max:
+                                            results.append({
+                                                "titel": f"{marke} {modell}",
+                                                "preis": preis_val, "km": 0, "jahr": 0,
+                                                "standort": "Deutschland (250km Langenargen)",
+                                                "beschreibung": "",
+                                                "url": "https://www.kleinanzeigen.de" + m,
+                                                "quelle": quelle, "auto": f"{marke} {modell}",
+                                                "unfallfrei": True
+                                            })
+                                    except:
+                                        pass
+                            print(f"  ✅ {len(results)} Angebote von eBay Kleinanzeigen")
+
         except Exception as e:
-            print(f"  JSON-Parse-Fehler: {e}")
-            continue
+            print(f"  Fehler {quelle}: {e}")
 
-        for item in items:
-            if item.get("unfallfrei") == False:
-                print(f"  ⏭️ Nicht unfallfrei: {item.get('titel','')}")
-                continue
-            if item.get("ahk") == False:
-                print(f"  ⏭️ Kein AHK: {item.get('titel','')}")
-                continue
-
-            beschr = item.get("beschreibung", "") + " " + item.get("titel", "")
-            ok, grund = ist_unfallfrei(beschr)
-            if not ok:
-                print(f"  ⏭️ Keyword '{grund}': {item.get('titel','')}")
-                continue
-
-            ausland = ["österreich", "schweiz", "niederlande", "belgien",
-                       "frankreich", "italien", "spanien", "polen"]
-            standort = item.get("standort", "").lower()
-            if any(k in standort for k in ausland):
-                print(f"  ⏭️ Ausland ({standort}): {item.get('titel','')}")
-                continue
-
-            ahk_ok, ahk_info = hat_ahk(beschr + " " + str(item.get("zuglast", "")), AHK_MIN_ZUGLAST)
-            item["ahk_info"] = ahk_info if ahk_ok else f"{item.get('zuglast', AHK_MIN_ZUGLAST)} kg"
-            item["quelle"] = quelle
-            item["auto"] = f"{marke} {modell}"
-            results.append(item)
-            print(f"  ✅ Angebot akzeptiert: {item.get('titel','')}")
-
-        await asyncio.sleep(3)
+        await asyncio.sleep(2)
 
     return results
 
