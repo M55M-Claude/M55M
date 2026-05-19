@@ -790,6 +790,9 @@ AHK_WOERTER = [
 # Mindestzuglast in kg
 AHK_MIN_ZUGLAST = 2000
 
+# Mindest-PS
+AUTO_MIN_PS = 160
+
 # Nur Deutschland
 NUR_DEUTSCHLAND = True
 
@@ -949,7 +952,8 @@ async def suche_mobile_de(marke: str, modell: str, preis_min: int, preis_max: in
             "maxItems": 20,
         }
         headers = {"Authorization": f"Bearer {APIPY_TOKEN}"}
-        run_url = "https://api.apify.com/v2/acts/ivanvs~mobile-de-scraper/run-sync-get-dataset-items"
+        # azzouzana scraper akzeptiert direkt eine Such-URL
+        run_url = "https://api.apify.com/v2/acts/azzouzana~mobile-de-scraper-pro-by-search-url/run-sync-get-dataset-items"
 
         async with aiohttp.ClientSession() as session:
             async with session.post(
@@ -963,13 +967,15 @@ async def suche_mobile_de(marke: str, modell: str, preis_min: int, preis_max: in
                     data = await resp.json()
                     print(f"  ✅ {len(data)} Ergebnisse von Mobile.de")
                     for car in data:
-                        titel = car.get("title", f"{marke} {modell}")
-                        preis = car.get("price", 0)
-                        km = car.get("mileage", 0)
-                        jahr = str(car.get("firstRegistration", ""))[:4]
-                        link = car.get("url", "")
-                        beschr = car.get("description", "")
-                        standort = car.get("seller", {}).get("city", "Deutschland") if isinstance(car.get("seller"), dict) else "Deutschland"
+                        titel = car.get("title", car.get("name", f"{marke} {modell}"))
+                        preis = car.get("price", car.get("priceRaw", 0))
+                        km = car.get("mileage", car.get("km", 0))
+                        jahr = str(car.get("firstRegistration", car.get("year", "")))[:4]
+                        link = car.get("url", car.get("link", ""))
+                        beschr = car.get("description", car.get("shortDescription", ""))
+                        standort = car.get("location", car.get("city", "Deutschland"))
+                        if isinstance(standort, dict):
+                            standort = standort.get("city", "Deutschland")
 
                         ok, grund = ist_unfallfrei(titel + " " + beschr)
                         if not ok:
@@ -1004,7 +1010,7 @@ async def post_auto_suche_links():
             "as24": f"https://www.autoscout24.de/lst/skoda/kodiaq?atype=C&cy=D&damaged_listing=exclude&fregfrom={AUTO_JAHR_MIN}&fregto={AUTO_JAHR_MAX}&kmto={AUTO_KM_MAX}&pricefrom={AUTO_PREIS_MIN}&priceto={AUTO_PREIS_MAX}&sort=age&desc=0",
             "mobile": f"https://suchen.mobile.de/fahrzeuge/search.html?makeModelVariant1.makeId=74&makeModelVariant1.modelId=3&minFirstRegistrationDate={AUTO_JAHR_MIN}-01-01&maxFirstRegistrationDate={AUTO_JAHR_MAX}-12-31&minPrice={AUTO_PREIS_MIN}&maxPrice={AUTO_PREIS_MAX}&maxMileage={AUTO_KM_MAX}&damageUnrepaired=WITHOUT_DAMAGE_UNREPAIRED&lang=de",
             "ebay": f"https://www.kleinanzeigen.de/s-skoda-kodiaq/langenargen/k0c216l8464r250?minPrice={AUTO_PREIS_MIN}&maxPrice={AUTO_PREIS_MAX}",
-            "filter": f"{AUTO_PREIS_MIN:,}€-{AUTO_PREIS_MAX:,}€ • max {AUTO_KM_MAX:,}km • {AUTO_JAHR_MIN}-{AUTO_JAHR_MAX}".replace(",",".")
+            "filter": f"{AUTO_PREIS_MIN:,}€-{AUTO_PREIS_MAX:,}€ • max {AUTO_KM_MAX:,}km • {AUTO_JAHR_MIN}-{AUTO_JAHR_MAX} • min {AUTO_MIN_PS}PS".replace(",",".")
         },
         {
             "name": f"{AUTO2_MARKE} {AUTO2_MODELL}",
@@ -1012,7 +1018,7 @@ async def post_auto_suche_links():
             "as24": f"https://www.autoscout24.de/lst/volkswagen/touareg?atype=C&cy=D&damaged_listing=exclude&fregfrom={AUTO2_JAHR_MIN}&fregto={AUTO2_JAHR_MAX}&kmto={AUTO2_KM_MAX}&pricefrom={AUTO2_PREIS_MIN}&priceto={AUTO2_PREIS_MAX}&sort=age&desc=0",
             "mobile": f"https://suchen.mobile.de/fahrzeuge/search.html?makeModelVariant1.makeId=25200&makeModelVariant1.modelId=51&minFirstRegistrationDate={AUTO2_JAHR_MIN}-01-01&maxFirstRegistrationDate={AUTO2_JAHR_MAX}-12-31&minPrice={AUTO2_PREIS_MIN}&maxPrice={AUTO2_PREIS_MAX}&maxMileage={AUTO2_KM_MAX}&damageUnrepaired=WITHOUT_DAMAGE_UNREPAIRED&lang=de",
             "ebay": f"https://www.kleinanzeigen.de/s-vw-touareg/langenargen/k0c216l8464r250?minPrice={AUTO2_PREIS_MIN}&maxPrice={AUTO2_PREIS_MAX}",
-            "filter": f"{AUTO2_PREIS_MIN:,}€-{AUTO2_PREIS_MAX:,}€ • max {AUTO2_KM_MAX:,}km • ab {AUTO2_JAHR_MIN}".replace(",",".")
+            "filter": f"{AUTO2_PREIS_MIN:,}€-{AUTO2_PREIS_MAX:,}€ • max {AUTO2_KM_MAX:,}km • ab {AUTO2_JAHR_MIN} • min {AUTO_MIN_PS}PS".replace(",",".")
         },
         {
             "name": f"{AUTO3_MARKE} {AUTO3_MODELL}",
@@ -1020,7 +1026,7 @@ async def post_auto_suche_links():
             "as24": f"https://www.autoscout24.de/lst/volkswagen/tiguan?atype=C&cy=D&damaged_listing=exclude&fregfrom={AUTO3_JAHR_MIN}&fregto={AUTO3_JAHR_MAX}&kmto={AUTO3_KM_MAX}&pricefrom={AUTO3_PREIS_MIN}&priceto={AUTO3_PREIS_MAX}&sort=age&desc=0",
             "mobile": f"https://suchen.mobile.de/fahrzeuge/search.html?makeModelVariant1.makeId=25200&makeModelVariant1.modelId=21&minFirstRegistrationDate={AUTO3_JAHR_MIN}-01-01&maxFirstRegistrationDate={AUTO3_JAHR_MAX}-12-31&minPrice={AUTO3_PREIS_MIN}&maxPrice={AUTO3_PREIS_MAX}&maxMileage={AUTO3_KM_MAX}&damageUnrepaired=WITHOUT_DAMAGE_UNREPAIRED&lang=de",
             "ebay": f"https://www.kleinanzeigen.de/s-vw-tiguan/langenargen/k0c216l8464r250?minPrice={AUTO3_PREIS_MIN}&maxPrice={AUTO3_PREIS_MAX}",
-            "filter": f"{AUTO3_PREIS_MIN:,}€-{AUTO3_PREIS_MAX:,}€ • max {AUTO3_KM_MAX:,}km • ab {AUTO3_JAHR_MIN}".replace(",",".")
+            "filter": f"{AUTO3_PREIS_MIN:,}€-{AUTO3_PREIS_MAX:,}€ • max {AUTO3_KM_MAX:,}km • ab {AUTO3_JAHR_MIN} • min {AUTO_MIN_PS}PS".replace(",",".")
         },
     ]
 
