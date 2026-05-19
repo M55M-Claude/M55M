@@ -842,217 +842,54 @@ def hat_ahk(beschreibung: str, zuglast: int) -> tuple:
     return True, "AHK vorhanden (Zuglast nicht angegeben)"
 
 async def scrape_auto(marke, modell, preis_min, preis_max, km_max, jahr_min, jahr_max, urls) -> list:
-    """Sucht Autos direkt über AutoScout24 JSON-API und eBay Kleinanzeigen"""
+    """Sucht Autos via Claude Web-Search Tool"""
     results = []
+    try:
+        # Claude mit Web-Search nach aktuellen Angeboten suchen lassen
+        import anthropic as _anthropic
+        client = _anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "application/json, text/html, */*",
-        "Accept-Language": "de-DE,de;q=0.9",
-    }
+        prompt = (
+            f"Suche aktuelle Angebote für {marke} {modell} in Deutschland auf AutoScout24 und eBay Kleinanzeigen. "
+            f"Filter: Preis {preis_min}€ bis {preis_max}€, max {km_max}km, Baujahr {jahr_min}-{jahr_max}, nur unfallfrei. "
+            f"Gib mir eine Liste mit konkreten Angeboten als JSON-Array. "
+            f'Format: [{{"titel":"...","preis":22000,"km":50000,"jahr":2022,"standort":"Stadt","url":"https://...","beschreibung":"..."}}] '
+            f"Nur echte aktuelle Angebote mit Links aufnehmen."
+        )
 
-    for quelle, url in urls.items():
-        if "Mobile.de" in quelle:
-            continue  # Mobile.de blockiert
+        response = client.messages.create(
+            model="claude-opus-4-5",
+            max_tokens=2000,
+            tools=[{"type": "web_search_20250305", "name": "web_search"}],
+            messages=[{"role": "user", "content": prompt}]
+        )
 
-        print(f"  🔍 Suche auf {quelle}...")
+        # Antwort Text extrahieren
+        full_text = ""
+        for block in response.content:
+            if hasattr(block, "text"):
+                full_text += block.text
 
-        try:
-            # AutoScout24: JSON API nutzen
-            if "autoscout24" in url:
-                # API URL aufbauen
-                marke_lower = marke.lower().replace(" ", "-")
-                modell_lower = modell.lower().replace(" ", "-")
-                api_url = (
-                    f"https://www.autoscout24.de/lst/{marke_lower}/{modell_lower}"
-                    f"?atype=C&cy=D&damaged_listing=exclude"
-                    f"&fregfrom={jahr_min}&fregto={jahr_max}"
-                    f"&kmto={km_max}&pricefrom={preis_min}&priceto={preis_max}"
-                    f"&sort=age&desc=0&size=20&page=1&format=json"
-                )
-                async with aiohttp.ClientSession(headers=headers) as session:
-                    async with session.get(api_url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                        print(f"  HTTP {resp.status} von {quelle}")
-                        if resp.status == 200:
-                            try:
-                                data = await resp.json(content_type=None)
-                                listings = data.get("listings", data.get("data", data.get("results", [])))
-                                if isinstance(listings, list):
-                                    for car in listings[:10]:
-                                        titel = car.get("title", f"{marke} {modell}")
-                                        preis = car.get("price", car.get("priceRaw", 0))
-                                        km = car.get("mileage", car.get("km", 0))
-                                        jahr = car.get("firstRegistrationYear", car.get("year", 0))
-                                        standort = car.get("location", {})
-                                        if isinstance(standort, dict):
-                                            standort = standort.get("city", "Deutschland")
-                                        car_url = car.get("url", car.get("link", ""))
-                                        if car_url and not car_url.startswith("http"):
-                                            car_url = "https://www.autoscout24.de" + car_url
-                                        results.append({
-                                            "titel": titel, "preis": preis, "km": km,
-                                            "jahr": jahr, "standort": standort,
-                                            "beschreibung": car.get("description", ""),
-                                            "url": car_url, "quelle": quelle,
-                                            "auto": f"{marke} {modell}", "unfallfrei": True
-                                        })
-                                    print(f"  ✅ {len(listings)} Angebote via JSON API")
-                                    continue
-                            except:
-                                pass
+        print(f"  Claude Web-Search Antwort: {full_text[:300]}")
 
-                        # Fallback: HTML mit erhöhtem Text-Limit
-                        async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp2:
-                            if resp2.status == 200:
-                                text = await resp2.text()
-                                # JSON aus HTML extrahieren (AutoScout24 bettet __NEXT_DATA__ ein)
-                                match = re.search(r'__NEXT_DATA__["\s]*=["\s]*({.*?})\s*;?\s*</script>', text, re.DOTALL)
-                                if match:
-                                    try:
-                                        next_data = json.loads(match.group(1))
-                                        props = next_data.get("props", {}).get("pageProps", {})
-                                        listings = props.get("listings", props.get("initialState", {}).get("listings", {}).get("data", []))
-                                        for car in listings[:10]:
-                                            titel = f"{marke} {modell}"
-                                            preis = car.get("price", 0)
-                                            km = car.get("mileage", 0)
-                                            jahr = car.get("firstRegistrationYear", 0)
-                                            car_url = "https://www.autoscout24.de" + car.get("url", "")
-                                            results.append({
-                                                "titel": titel, "preis": preis, "km": km,
-                                                "jahr": jahr, "standort": "Deutschland",
-                                                "beschreibung": "", "url": car_url,
-                                                "quelle": quelle, "auto": f"{marke} {modell}",
-                                                "unfallfrei": True
-                                            })
-                                        print(f"  ✅ {len(listings)} Angebote aus __NEXT_DATA__")
-                                        continue
-                                    except Exception as e:
-                                        print(f"  JSON-Parse: {e}")
+        # JSON aus Antwort extrahieren
+        match = re.search(r'\[.*?\]', full_text, re.DOTALL)
+        if match:
+            items = json.loads(match.group())
+            for item in items:
+                item["quelle"] = "Web-Suche"
+                item["auto"] = f"{marke} {modell}"
+                item["unfallfrei"] = True
+                results.append(item)
+            print(f"  ✅ {len(items)} Angebote gefunden")
+        else:
+            print(f"  Kein JSON gefunden in Antwort")
 
-            # eBay Kleinanzeigen: HTML parsen
-            elif "kleinanzeigen" in url:
-                async with aiohttp.ClientSession(headers=headers) as session:
-                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                        print(f"  HTTP {resp.status} von {quelle}")
-                        if resp.status == 200:
-                            text = await resp.text()
-                            # Anzeigen aus HTML extrahieren
-                            artikel = re.findall(
-                                r'data-adid="(\d+)"[^>]*>.*?<a[^>]*href="(/s-anzeige/[^"]+)"[^>]*>.*?<p[^>]*class="[^"]*text-module-begin[^"]*"[^>]*>(.*?)</p>.*?<strong[^>]*>([\d.,]+)\s*€</strong>',
-                                text, re.DOTALL
-                            )
-                            if not artikel:
-                                # Simpler Ansatz
-                                matches = re.findall(r'href="(/s-anzeige/[^"]+)"', text)
-                                preise = re.findall(r'([\d.]+)\s*€', text)
-                                for i, (m, p) in enumerate(zip(matches[:10], preise[:10])):
-                                    try:
-                                        preis_val = float(p.replace(".", "").replace(",", "."))
-                                        if preis_min <= preis_val <= preis_max:
-                                            results.append({
-                                                "titel": f"{marke} {modell}",
-                                                "preis": preis_val, "km": 0, "jahr": 0,
-                                                "standort": "Deutschland (250km Langenargen)",
-                                                "beschreibung": "",
-                                                "url": "https://www.kleinanzeigen.de" + m,
-                                                "quelle": quelle, "auto": f"{marke} {modell}",
-                                                "unfallfrei": True
-                                            })
-                                    except:
-                                        pass
-                            print(f"  ✅ {len(results)} Angebote von eBay Kleinanzeigen")
-
-        except Exception as e:
-            print(f"  Fehler {quelle}: {e}")
-
-        await asyncio.sleep(2)
+    except Exception as e:
+        print(f"  Web-Search Fehler: {e}")
 
     return results
 
-def passes_filter_generic(item, preis_min, preis_max, km_max, jahr_min, jahr_max) -> bool:
-    try:
-        preis = float(str(item.get("preis", 0)).replace(".", "").replace(",", "").replace("€", "").strip())
-        km = float(str(item.get("km", 0)).replace(".", "").replace(",", "").replace("km", "").strip())
-        jahr = int(str(item.get("jahr", 0)).strip())
-        if preis and (preis < preis_min or preis > preis_max): return False
-        if km and km > km_max: return False
-        if jahr and (jahr < jahr_min or jahr > jahr_max): return False
-        return True
-    except:
-        return True
-
-async def check_auto_still_available(url: str) -> bool:
-    """Prüft ob ein Auto-Inserat noch verfügbar ist"""
-    if not url or not url.startswith("http"):
-        return True  # Kein URL → behalten
-
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-    try:
-        async with aiohttp.ClientSession(headers=headers) as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                if resp.status == 404:
-                    return False
-                if resp.status == 200:
-                    text = await resp.text()
-                    # Typische Texte wenn Inserat nicht mehr verfügbar
-                    nicht_mehr_da = [
-                        "inserat nicht mehr verfügbar", "anzeige nicht mehr verfügbar",
-                        "dieses inserat wurde", "bereits verkauft", "nicht mehr aktiv",
-                        "angebot nicht mehr", "leider nicht mehr", "this listing",
-                        "no longer available", "sold", "verkauft", "gelöscht",
-                        "404", "nicht gefunden"
-                    ]
-                    text_lower = text.lower()
-                    if any(phrase in text_lower for phrase in nicht_mehr_da):
-                        return False
-                return True
-    except:
-        return True  # Im Zweifel behalten
-
-@tasks.loop(minutes=60)  # Jede Stunde prüfen
-async def verify_autos():
-    """Prüft ob gepostete Autos noch verfügbar sind – löscht abgelaufene"""
-    global posted_autos
-    print(f"🔍 Auto-Verfügbarkeits-Check ({datetime.now().strftime('%H:%M')})")
-    to_delete = []
-
-    for aid, data in posted_autos.items():
-        url = data.get("url", "")
-        titel = data.get("titel", "Unbekannt")
-
-        still_available = await check_auto_still_available(url)
-
-        if not still_available:
-            print(f"  🗑️ Inserat nicht mehr verfügbar: {titel}")
-            try:
-                guild = bot.get_guild(data.get("guild_id"))
-                channel = guild.get_channel(data.get("channel_id")) if guild else None
-                if channel:
-                    msg = await channel.fetch_message(data.get("message_id"))
-                    embed = discord.Embed(
-                        title=f"❌ Nicht mehr verfügbar: ~~{titel}~~",
-                        description="Dieses Inserat wurde entfernt oder das Auto wurde verkauft.",
-                        color=discord.Color.red(),
-                        timestamp=datetime.now()
-                    )
-                    embed.set_footer(text="Automatisch erkannt – Inserat nicht mehr verfügbar")
-                    await msg.edit(embed=embed)
-                    await asyncio.sleep(3)
-                    await msg.delete()
-            except Exception as e:
-                print(f"  Lösch-Fehler: {e}")
-            to_delete.append(aid)
-
-        await asyncio.sleep(2)
-
-    for aid in to_delete:
-        del posted_autos[aid]
-    if to_delete:
-        save_json(POSTED_AUTOS_FILE, posted_autos)
-        print(f"  → {len(to_delete)} nicht mehr verfügbare Inserate gelöscht")
-    else:
-        print(f"  → Alle Inserate noch verfügbar")
 
 @tasks.loop(minutes=AUTO_CHECK_INTERVAL)
 async def check_autos():
