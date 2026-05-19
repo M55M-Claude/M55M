@@ -842,52 +842,58 @@ def hat_ahk(beschreibung: str, zuglast: int) -> tuple:
     return True, "AHK vorhanden (Zuglast nicht angegeben)"
 
 async def scrape_auto(marke, modell, preis_min, preis_max, km_max, jahr_min, jahr_max, urls) -> list:
-    """Sucht Autos via Claude Web-Search Tool"""
+    """Sucht Autos via Anthropic API mit Web-Search (async)"""
     results = []
     try:
-        # Claude mit Web-Search nach aktuellen Angeboten suchen lassen
-        import anthropic as _anthropic
-        client = _anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-
-        prompt = (
-            f"Suche aktuelle Angebote für {marke} {modell} in Deutschland auf AutoScout24 und eBay Kleinanzeigen. "
-            f"Filter: Preis {preis_min}€ bis {preis_max}€, max {km_max}km, Baujahr {jahr_min}-{jahr_max}, nur unfallfrei. "
-            f"Gib mir eine Liste mit konkreten Angeboten als JSON-Array. "
-            f'Format: [{{"titel":"...","preis":22000,"km":50000,"jahr":2022,"standort":"Stadt","url":"https://...","beschreibung":"..."}}] '
-            f"Nur echte aktuelle Angebote mit Links aufnehmen."
-        )
-
-        response = client.messages.create(
-            model="claude-opus-4-5",
-            max_tokens=2000,
-            tools=[{"type": "web_search_20250305", "name": "web_search"}],
-            messages=[{"role": "user", "content": prompt}]
-        )
-
-        # Antwort Text extrahieren
-        full_text = ""
-        for block in response.content:
-            if hasattr(block, "text"):
-                full_text += block.text
-
-        print(f"  Claude Web-Search Antwort: {full_text[:300]}")
-
-        # JSON aus Antwort extrahieren
-        match = re.search(r'\[.*?\]', full_text, re.DOTALL)
-        if match:
-            items = json.loads(match.group())
-            for item in items:
-                item["quelle"] = "Web-Suche"
-                item["auto"] = f"{marke} {modell}"
-                item["unfallfrei"] = True
-                results.append(item)
-            print(f"  ✅ {len(items)} Angebote gefunden")
-        else:
-            print(f"  Kein JSON gefunden in Antwort")
-
+        headers_api = {
+            "x-api-key": ANTHROPIC_API_KEY,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+            "anthropic-beta": "web-search-2025-03-05"
+        }
+        payload = {
+            "model": "claude-opus-4-5",
+            "max_tokens": 2000,
+            "tools": [{"type": "web_search_20250305", "name": "web_search"}],
+            "messages": [{
+                "role": "user",
+                "content": (
+                    f"Suche auf AutoScout24.de und Kleinanzeigen.de nach {marke} {modell} in Deutschland. "
+                    f"Filter: Preis {preis_min}-{preis_max}€, max {km_max}km, Baujahr {jahr_min}-{jahr_max}, unfallfrei. "
+                    f"Gib mir eine JSON-Liste echter aktueller Angebote: "
+                    f'[{{"titel":"...","preis":22000,"km":50000,"jahr":2022,"standort":"Stadt","url":"https://...","beschreibung":"kurze Info"}}]'
+                )
+            }]
+        }
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "https://api.anthropic.com/v1/messages",
+                headers=headers_api,
+                json=payload,
+                timeout=aiohttp.ClientTimeout(total=60)
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    full_text = " ".join(
+                        b.get("text", "") for b in data.get("content", [])
+                        if b.get("type") == "text"
+                    )
+                    print(f"  Claude Antwort ({len(full_text)} Zeichen): {full_text[:200]}")
+                    match = re.search(r"\[.*?\]", full_text, re.DOTALL)
+                    if match:
+                        items = json.loads(match.group())
+                        for item in items:
+                            item["quelle"] = "AutoScout24/Kleinanzeigen"
+                            item["auto"] = f"{marke} {modell}"
+                            item.setdefault("unfallfrei", True)
+                            results.append(item)
+                        print(f"  ✅ {len(items)} Angebote gefunden")
+                    else:
+                        print(f"  Kein JSON in Antwort")
+                else:
+                    print(f"  API Fehler: {resp.status}")
     except Exception as e:
-        print(f"  Web-Search Fehler: {e}")
-
+        print(f"  Scrape-Fehler: {e}")
     return results
 
 
@@ -1135,7 +1141,7 @@ async def on_ready():
     for fn in [check_eft_news, check_eft_patchnotes, check_eft_release,
                check_eft_codes, verify_eft_codes,
                check_arma_koth_codes, verify_arma_koth_codes,
-               check_autos, verify_autos]:
+               check_autos]:
         if not fn.is_running():
             fn.start()
     print("🚀 Alle Tasks gestartet!")
