@@ -948,11 +948,10 @@ async def suche_mobile_de(marke: str, modell: str, preis_min: int, preis_max: in
             search_url += f"&makeModelVariant1.makeId={marke_id}&makeModelVariant1.modelId={modell_id}"
 
         payload = {
-            "startUrls": [{"url": search_url}],
+            "searchUrl": search_url,
             "maxItems": 20,
         }
         headers = {"Authorization": f"Bearer {APIPY_TOKEN}"}
-        # azzouzana scraper akzeptiert direkt eine Such-URL
         run_url = "https://api.apify.com/v2/acts/azzouzana~mobile-de-scraper-pro-by-search-url/run-sync-get-dataset-items"
 
         async with aiohttp.ClientSession() as session:
