@@ -69,15 +69,7 @@ AUTO_URLS = {
         f"&kmto={AUTO_KM_MAX}&pricefrom={AUTO_PREIS_MIN}&priceto={AUTO_PREIS_MAX}"
         f"&sort=age&desc=0&size=20&page=1"
     ),
-    "Mobile.de": (
-        f"https://suchen.mobile.de/fahrzeuge/search.html"
-        f"?dam=0&isSearchRequest=true&ms=25200%3B51%3B%3B&ref=dsp"
-        f"&s=Car&sb=rel&vc=Car"
-        f"&minFirstRegistrationDate={AUTO_JAHR_MIN}-01-01"
-        f"&maxFirstRegistrationDate={AUTO_JAHR_MAX}-12-31"
-        f"&minPrice={AUTO_PREIS_MIN}&maxPrice={AUTO_PREIS_MAX}"
-        f"&maxMileage={AUTO_KM_MAX}"
-    ),
+    # Mobile.de blockiert automatische Anfragen (HTTP 403)
     "eBay Kleinanzeigen": (
         f"https://www.kleinanzeigen.de/s-skoda-kodiaq/langenargen/k0c216l8464r250"
         f"?minPrice={AUTO_PREIS_MIN}&maxPrice={AUTO_PREIS_MAX}"
@@ -92,15 +84,7 @@ AUTO2_URLS = {
         f"&kmto={AUTO2_KM_MAX}&pricefrom={AUTO2_PREIS_MIN}&priceto={AUTO2_PREIS_MAX}"
         f"&sort=age&desc=0&size=20&page=1"
     ),
-    "Mobile.de": (
-        f"https://suchen.mobile.de/fahrzeuge/search.html"
-        f"?dam=0&isSearchRequest=true&ms=25200%3B51%3B%3B&ref=dsp"
-        f"&s=Car&sb=rel&vc=Car"
-        f"&minFirstRegistrationDate={AUTO2_JAHR_MIN}-01-01"
-        f"&maxFirstRegistrationDate={AUTO2_JAHR_MAX}-12-31"
-        f"&minPrice={AUTO2_PREIS_MIN}&maxPrice={AUTO2_PREIS_MAX}"
-        f"&maxMileage={AUTO2_KM_MAX}"
-    ),
+    # Mobile.de blockiert automatische Anfragen (HTTP 403)
     "eBay Kleinanzeigen": (
         f"https://www.kleinanzeigen.de/s-autos/vw-touareg/k0c216"
         f"?minPrice={AUTO2_PREIS_MIN}&maxPrice={AUTO2_PREIS_MAX}"
@@ -124,15 +108,7 @@ AUTO3_URLS = {
         f"&kmto={AUTO3_KM_MAX}&pricefrom={AUTO3_PREIS_MIN}&priceto={AUTO3_PREIS_MAX}"
         f"&sort=age&desc=0&size=20&page=1"
     ),
-    "Mobile.de": (
-        f"https://suchen.mobile.de/fahrzeuge/search.html"
-        f"?dam=0&isSearchRequest=true&ms=25200%3B51%3B%3B&ref=dsp"
-        f"&s=Car&sb=rel&vc=Car"
-        f"&minFirstRegistrationDate={AUTO3_JAHR_MIN}-01-01"
-        f"&maxFirstRegistrationDate={AUTO3_JAHR_MAX}-12-31"
-        f"&minPrice={AUTO3_PREIS_MIN}&maxPrice={AUTO3_PREIS_MAX}"
-        f"&maxMileage={AUTO3_KM_MAX}"
-    ),
+    # Mobile.de blockiert automatische Anfragen (HTTP 403)
     "eBay Kleinanzeigen": (
         f"https://www.kleinanzeigen.de/s-vw-tiguan/langenargen/k0c216l8464r250"
         f"?minPrice={AUTO3_PREIS_MIN}&maxPrice={AUTO3_PREIS_MAX}"
