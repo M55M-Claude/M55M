@@ -841,158 +841,60 @@ def hat_ahk(beschreibung: str, zuglast: int) -> tuple:
     # AHK erwähnt aber keine Zuglast gefunden → Claude soll entscheiden
     return True, "AHK vorhanden (Zuglast nicht angegeben)"
 
-async def scrape_auto(marke, modell, preis_min, preis_max, km_max, jahr_min, jahr_max, urls) -> list:
-    """Sucht Autos via Anthropic API mit Web-Search (async)"""
-    results = []
-    try:
-        headers_api = {
-            "x-api-key": ANTHROPIC_API_KEY,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-            "anthropic-beta": "web-search-2025-03-05"
-        }
-        payload = {
-            "model": "claude-opus-4-5",
-            "max_tokens": 2000,
-            "tools": [{"type": "web_search_20250305", "name": "web_search"}],
-            "messages": [{
-                "role": "user",
-                "content": (
-                    f"Suche auf AutoScout24.de und Kleinanzeigen.de nach {marke} {modell} in Deutschland. "
-                    f"Filter: Preis {preis_min}-{preis_max}€, max {km_max}km, Baujahr {jahr_min}-{jahr_max}, unfallfrei. "
-                    f"Gib mir eine JSON-Liste echter aktueller Angebote: "
-                    f'[{{"titel":"...","preis":22000,"km":50000,"jahr":2022,"standort":"Stadt","url":"https://...","beschreibung":"kurze Info"}}]'
-                )
-            }]
-        }
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                "https://api.anthropic.com/v1/messages",
-                headers=headers_api,
-                json=payload,
-                timeout=aiohttp.ClientTimeout(total=60)
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    full_text = " ".join(
-                        b.get("text", "") for b in data.get("content", [])
-                        if b.get("type") == "text"
-                    )
-                    print(f"  Claude Antwort ({len(full_text)} Zeichen): {full_text[:200]}")
-                    match = re.search(r"\[.*?\]", full_text, re.DOTALL)
-                    if match:
-                        items = json.loads(match.group())
-                        for item in items:
-                            item["quelle"] = "AutoScout24/Kleinanzeigen"
-                            item["auto"] = f"{marke} {modell}"
-                            item.setdefault("unfallfrei", True)
-                            results.append(item)
-                        print(f"  ✅ {len(items)} Angebote gefunden")
-                    else:
-                        print(f"  Kein JSON in Antwort")
-                else:
-                    print(f"  API Fehler: {resp.status}")
-    except Exception as e:
-        print(f"  Scrape-Fehler: {e}")
-    return results
+async def post_auto_suche_links():
+    """Postet direkte Such-Links für alle Autos in den Discord Channel"""
+    autos = [
+        {
+            "name": f"{AUTO_MARKE} {AUTO_MODELL}",
+            "emoji": "🚙",
+            "as24": f"https://www.autoscout24.de/lst/skoda/kodiaq?atype=C&cy=D&damaged_listing=exclude&fregfrom={AUTO_JAHR_MIN}&fregto={AUTO_JAHR_MAX}&kmto={AUTO_KM_MAX}&pricefrom={AUTO_PREIS_MIN}&priceto={AUTO_PREIS_MAX}&sort=age&desc=0",
+            "ebay": f"https://www.kleinanzeigen.de/s-skoda-kodiaq/langenargen/k0c216l8464r250?minPrice={AUTO_PREIS_MIN}&maxPrice={AUTO_PREIS_MAX}",
+            "filter": f"{AUTO_PREIS_MIN:,}€-{AUTO_PREIS_MAX:,}€ • max {AUTO_KM_MAX:,}km • {AUTO_JAHR_MIN}-{AUTO_JAHR_MAX}".replace(",",".")
+        },
+        {
+            "name": f"{AUTO2_MARKE} {AUTO2_MODELL}",
+            "emoji": "🚗",
+            "as24": f"https://www.autoscout24.de/lst/volkswagen/touareg?atype=C&cy=D&damaged_listing=exclude&fregfrom={AUTO2_JAHR_MIN}&fregto={AUTO2_JAHR_MAX}&kmto={AUTO2_KM_MAX}&pricefrom={AUTO2_PREIS_MIN}&priceto={AUTO2_PREIS_MAX}&sort=age&desc=0",
+            "ebay": f"https://www.kleinanzeigen.de/s-vw-touareg/langenargen/k0c216l8464r250?minPrice={AUTO2_PREIS_MIN}&maxPrice={AUTO2_PREIS_MAX}",
+            "filter": f"{AUTO2_PREIS_MIN:,}€-{AUTO2_PREIS_MAX:,}€ • max {AUTO2_KM_MAX:,}km • ab {AUTO2_JAHR_MIN}".replace(",",".")
+        },
+        {
+            "name": f"{AUTO3_MARKE} {AUTO3_MODELL}",
+            "emoji": "🚕",
+            "as24": f"https://www.autoscout24.de/lst/volkswagen/tiguan?atype=C&cy=D&damaged_listing=exclude&fregfrom={AUTO3_JAHR_MIN}&fregto={AUTO3_JAHR_MAX}&kmto={AUTO3_KM_MAX}&pricefrom={AUTO3_PREIS_MIN}&priceto={AUTO3_PREIS_MAX}&sort=age&desc=0",
+            "ebay": f"https://www.kleinanzeigen.de/s-vw-tiguan/langenargen/k0c216l8464r250?minPrice={AUTO3_PREIS_MIN}&maxPrice={AUTO3_PREIS_MAX}",
+            "filter": f"{AUTO3_PREIS_MIN:,}€-{AUTO3_PREIS_MAX:,}€ • max {AUTO3_KM_MAX:,}km • ab {AUTO3_JAHR_MIN}".replace(",",".")
+        },
+    ]
+
+    embed = discord.Embed(
+        title="🚗 Aktuelle Autosuche – Direkte Links",
+        description="Hier sind deine gefilterten Suchergebnisse. Klicke auf die Links um aktuelle Angebote zu sehen:",
+        color=discord.Color.blue(),
+        timestamp=datetime.now()
+    )
+
+    for auto in autos:
+        embed.add_field(
+            name=f"{auto['emoji']} {auto['name']}",
+            value=(
+                f"**Filter:** {auto['filter']}\n[🔍 AutoScout24]({auto['as24']}) • [🔍 Kleinanzeigen]({auto['ebay']})"
+            ),
+            inline=False
+        )
+
+    embed.set_footer(text="Unfallfrei • Deutschland • Nur mit AHK suchen! • Alle 30 Min. aktualisiert")
+
+    for guild in bot.guilds:
+        await post_to_channel(guild, AUTO_CHANNEL, embed)
 
 
 @tasks.loop(minutes=AUTO_CHECK_INTERVAL)
 async def check_autos():
-    global posted_autos
     print(f"🚗 Auto-Suche ({datetime.now().strftime('%H:%M')})")
     try:
-        # Alle Autos und Quellen durchsuchen
-        all_results = []
-
-        # Skoda Kodiaq
-        all_results.extend(await scrape_auto(
-            AUTO_MARKE, AUTO_MODELL,
-            AUTO_PREIS_MIN, AUTO_PREIS_MAX, AUTO_KM_MAX, AUTO_JAHR_MIN, AUTO_JAHR_MAX,
-            AUTO_URLS
-        ))
-
-        # VW Touareg
-        all_results.extend(await scrape_auto(
-            AUTO2_MARKE, AUTO2_MODELL,
-            AUTO2_PREIS_MIN, AUTO2_PREIS_MAX, AUTO2_KM_MAX, AUTO2_JAHR_MIN, AUTO2_JAHR_MAX,
-            AUTO2_URLS
-        ))
-
-        # VW Tiguan
-        all_results.extend(await scrape_auto(
-            AUTO3_MARKE, AUTO3_MODELL,
-            AUTO3_PREIS_MIN, AUTO3_PREIS_MAX, AUTO3_KM_MAX, AUTO3_JAHR_MIN, AUTO3_JAHR_MAX,
-            AUTO3_URLS
-        ))
-
-        count = 0
-        for item in all_results:
-            aid = auto_id(item)
-            if aid in posted_autos:
-                continue
-            # Filter je nach Fahrzeug
-            auto_label = item.get("auto", f"{AUTO_MARKE} {AUTO_MODELL}")
-            if AUTO3_MODELL in auto_label:
-                if not passes_filter_generic(item, AUTO3_PREIS_MIN, AUTO3_PREIS_MAX, AUTO3_KM_MAX, AUTO3_JAHR_MIN, AUTO3_JAHR_MAX):
-                    continue
-            elif AUTO2_MODELL in auto_label:
-                if not passes_filter_generic(item, AUTO2_PREIS_MIN, AUTO2_PREIS_MAX, AUTO2_KM_MAX, AUTO2_JAHR_MIN, AUTO2_JAHR_MAX):
-                    continue
-            else:
-                if not passes_filter_generic(item, AUTO_PREIS_MIN, AUTO_PREIS_MAX, AUTO_KM_MAX, AUTO_JAHR_MIN, AUTO_JAHR_MAX):
-                    continue
-
-            quelle = item.get("quelle", "Unbekannt")
-            preis = item.get("preis", "?")
-            km = item.get("km", "?")
-            jahr = item.get("jahr", "?")
-            titel = item.get("titel", "Skoda Kodiaq")
-            beschreibung = item.get("beschreibung", "")
-            url = item.get("url", "")
-
-            # Farbe je nach Quelle
-            farbe = {
-                "AutoScout24": discord.Color.orange(),
-                "Mobile.de": discord.Color.blue(),
-                "eBay Kleinanzeigen": discord.Color.green()
-            }.get(quelle, discord.Color.gold())
-
-            embed = discord.Embed(
-                title=f"🚗 {titel}",
-                url=url if url else None,
-                description=beschreibung or f"{AUTO_MARKE} {AUTO_MODELL} gefunden!",
-                color=farbe,
-                timestamp=datetime.now()
-            )
-            embed.add_field(name="💶 Preis", value=f"{preis:,}€".replace(",", ".") if isinstance(preis, (int, float)) else f"{preis}€", inline=True)
-            embed.add_field(name="📍 Kilometerstand", value=f"{km:,} km".replace(",", ".") if isinstance(km, (int, float)) else f"{km} km", inline=True)
-            embed.add_field(name="📅 Baujahr", value=str(jahr), inline=True)
-            standort = item.get("standort", "Deutschland")
-            embed.add_field(name="📍 Standort", value=standort, inline=True)
-            embed.add_field(name="🔗 AHK", value=f"✅ {item.get('ahk_info', 'Vorhanden')}", inline=True)
-            embed.add_field(name="🌐 Quelle", value=quelle, inline=True)
-            if url:
-                embed.add_field(name="🔗 Link", value=f"[Zum Angebot]({url})", inline=True)
-            embed.set_footer(text=f"{item.get('auto','Auto')} • Unfallfrei • AHK min. {AHK_MIN_ZUGLAST}kg • 🇩🇪 Deutschland • eBay: 250km um Langenargen")
-
-            for guild in bot.guilds:
-                msg = await post_to_channel(guild, AUTO_CHANNEL, embed)
-                if msg:
-                    posted_autos[aid] = {
-                        "titel": titel,
-                        "quelle": quelle,
-                        "url": item.get("url", ""),
-                        "guild_id": guild.id,
-                        "channel_id": msg.channel.id,
-                        "message_id": msg.id,
-                        "found_at": datetime.now().isoformat()
-                    }
-            count += 1
-            await asyncio.sleep(2)
-
-        save_json(POSTED_AUTOS_FILE, posted_autos)
-        print(f"  → {count} neue Autos gefunden")
+        await post_auto_suche_links()
+        print(f"  → Such-Links gepostet")
     except Exception as e:
         print(f"Auto-Suche Fehler: {e}")
 
