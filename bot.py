@@ -847,16 +847,22 @@ async def suche_einzelne_inserate(marke: str, modell: str, preis_min: int, preis
     keywords = f"{marke}+{modell}".replace(" ", "+")
 
     # Kleinanzeigen RSS Feed (250km um Langenargen)
+    slug = f"{marke.lower()}-{modell.lower()}".replace(" ", "-")
     rss_urls = [
-        f"https://www.kleinanzeigen.de/s-anzeigen/anzeigen.rss?keywords={keywords}&categoryId=216&minPrice={preis_min}&maxPrice={preis_max}&locationStr=Langenargen&radius=250",
-        f"https://www.kleinanzeigen.de/s-{marke.lower()}-{modell.lower()}/langenargen/k0c216l8464r250.rss?minPrice={preis_min}&maxPrice={preis_max}",
+        f"https://www.kleinanzeigen.de/s-{slug}/k0c216.rss?minPrice={preis_min}&maxPrice={preis_max}",
+        f"https://www.kleinanzeigen.de/s-{slug}/langenargen/k0c216l8464r250.rss",
+        f"https://www.kleinanzeigen.de/s-{marke.lower()}/{modell.lower()}/k0c216.rss?minPrice={preis_min}&maxPrice={preis_max}",
     ]
 
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-
     for rss_url in rss_urls:
+        print(f"  🔗 RSS: {rss_url[:80]}")
         text = await fetch_url(rss_url)
-        if not text or "<rss" not in text.lower():
+        if not text:
+            print(f"  ❌ Kein Text zurück")
+            continue
+        print(f"  📄 {len(text)} Zeichen, RSS: {'ja' if '<rss' in text.lower() or '<feed' in text.lower() else 'nein'}")
+        print(f"  Preview: {text[:200]}")
+        if "<rss" not in text.lower() and "<feed" not in text.lower():
             continue
 
         items = parse_rss(text, 20)
