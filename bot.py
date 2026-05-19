@@ -841,6 +841,67 @@ def hat_ahk(beschreibung: str, zuglast: int) -> tuple:
     # AHK erwähnt aber keine Zuglast gefunden → Claude soll entscheiden
     return True, "AHK vorhanden (Zuglast nicht angegeben)"
 
+async def suche_einzelne_inserate(marke: str, modell: str, preis_min: int, preis_max: int, km_max: int, jahr_min: int, jahr_max: int) -> list:
+    """Sucht einzelne Inserate via Kleinanzeigen RSS-Feed"""
+    inserate = []
+    keywords = f"{marke}+{modell}".replace(" ", "+")
+
+    # Kleinanzeigen RSS Feed (250km um Langenargen)
+    rss_urls = [
+        f"https://www.kleinanzeigen.de/s-anzeigen/anzeigen.rss?keywords={keywords}&categoryId=216&minPrice={preis_min}&maxPrice={preis_max}&locationStr=Langenargen&radius=250",
+        f"https://www.kleinanzeigen.de/s-{marke.lower()}-{modell.lower()}/langenargen/k0c216l8464r250.rss?minPrice={preis_min}&maxPrice={preis_max}",
+    ]
+
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+
+    for rss_url in rss_urls:
+        text = await fetch_url(rss_url)
+        if not text or "<rss" not in text.lower():
+            continue
+
+        items = parse_rss(text, 20)
+        print(f"  📋 {len(items)} Inserate via RSS für {marke} {modell}")
+
+        for item in items:
+            titel = item.get("title", "")
+            link = item.get("link", "")
+            beschr = item.get("description", "")
+
+            if not link:
+                continue
+
+            # Preis aus Titel/Beschreibung extrahieren
+            preis_match = re.search(r'(\d[\d.,]+)\s*€', titel + " " + beschr)
+            preis_val = 0
+            if preis_match:
+                try:
+                    preis_val = float(preis_match.group(1).replace(".", "").replace(",", "."))
+                except:
+                    pass
+
+            # Preis-Filter
+            if preis_val and (preis_val < preis_min or preis_val > preis_max):
+                continue
+
+            # Unfallfrei-Check
+            ok, grund = ist_unfallfrei(titel + " " + beschr)
+            if not ok:
+                print(f"  ⏭️ Schaden gefunden ({grund}): {titel[:50]}")
+                continue
+
+            inserate.append({
+                "titel": titel,
+                "link": link,
+                "beschreibung": re.sub(r'<[^>]+>', '', beschr)[:300],
+                "preis": preis_val,
+                "auto": f"{marke} {modell}"
+            })
+
+        if inserate:
+            break  # Erste erfolgreiche URL reicht
+
+    return inserate
+
 async def post_auto_suche_links():
     """Postet direkte Such-Links für alle Autos in den Discord Channel"""
     autos = [
@@ -894,10 +955,55 @@ async def post_auto_suche_links():
 
 @tasks.loop(minutes=AUTO_CHECK_INTERVAL)
 async def check_autos():
+    global posted_autos
     print(f"🚗 Auto-Suche ({datetime.now().strftime('%H:%M')})")
     try:
+        # 1. Such-Links posten
         await post_auto_suche_links()
-        print(f"  → Such-Links gepostet")
+
+        # 2. Einzelne Inserate via RSS suchen und posten
+        alle_autos = [
+            (AUTO_MARKE, AUTO_MODELL, AUTO_PREIS_MIN, AUTO_PREIS_MAX, AUTO_KM_MAX, AUTO_JAHR_MIN, AUTO_JAHR_MAX),
+            (AUTO2_MARKE, AUTO2_MODELL, AUTO2_PREIS_MIN, AUTO2_PREIS_MAX, AUTO2_KM_MAX, AUTO2_JAHR_MIN, AUTO2_JAHR_MAX),
+            (AUTO3_MARKE, AUTO3_MODELL, AUTO3_PREIS_MIN, AUTO3_PREIS_MAX, AUTO3_KM_MAX, AUTO3_JAHR_MIN, AUTO3_JAHR_MAX),
+        ]
+
+        neu = 0
+        for marke, modell, p_min, p_max, km_max, j_min, j_max in alle_autos:
+            inserate = await suche_einzelne_inserate(marke, modell, p_min, p_max, km_max, j_min, j_max)
+            for ins in inserate:
+                aid = ins["link"]
+                if aid in posted_autos:
+                    continue
+
+                preis_str = f"{int(ins['preis']):,}€".replace(",", ".") if ins["preis"] else "Preis anfragen"
+                embed = discord.Embed(
+                    title=f"🚗 {ins['titel'][:200]}",
+                    url=ins["link"],
+                    description=ins["beschreibung"] or "Klicke für mehr Details.",
+                    color=discord.Color.green(),
+                    timestamp=datetime.now()
+                )
+                embed.add_field(name="💶 Preis", value=preis_str, inline=True)
+                embed.add_field(name="🚘 Modell", value=f"{marke} {modell}", inline=True)
+                embed.add_field(name="🌐 Quelle", value="Kleinanzeigen.de", inline=True)
+                embed.set_footer(text=f"Unfallfrei • 250km um Langenargen • {p_min:,}€-{p_max:,}€".replace(",","."))
+
+                for guild in bot.guilds:
+                    msg = await post_to_channel(guild, AUTO_CHANNEL, embed)
+                    if msg:
+                        posted_autos[aid] = {
+                            "titel": ins["titel"],
+                            "url": aid,
+                            "guild_id": guild.id,
+                            "channel_id": msg.channel.id,
+                            "message_id": msg.id,
+                        }
+                neu += 1
+                await asyncio.sleep(1)
+
+        save_json(POSTED_AUTOS_FILE, posted_autos)
+        print(f"  → {neu} neue Inserate gepostet")
     except Exception as e:
         print(f"Auto-Suche Fehler: {e}")
 
