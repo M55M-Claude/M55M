@@ -23,7 +23,7 @@ ARMA_KOTH_CODES_CHANNEL = "arma-reforger-koth-codes"
 
 # Intervalle (Minuten)
 EFT_NEWS_INTERVAL           = 30
-EFT_CODES_CHECK_INTERVAL    = 60
+EFT_CODES_CHECK_INTERVAL    = 30
 EFT_CODES_VERIFY_INTERVAL   = 120
 EFT_PATCH_INTERVAL          = 15
 EFT_RELEASE_INTERVAL        = 60
@@ -55,8 +55,8 @@ BSG_TWITTER_RSS_FEEDS = [
 ]
 
 EFT_RELEASE_SOURCES = [
-    "https://www.escapefromtarkov.com/news/rss",
-    "https://www.reddit.com/r/EscapeFromTarkov/search.json?q=wipe+date+release&sort=new&limit=10",
+    "https://www.escapefromtarkov.com/news/rss",  # Nur offizielle BSG Website
+    # Twitter via Nitter RSS (wenn verfügbar)
 ]
 EFT_CODES_URLS = [
     "https://progameguides.com/escape-from-tarkov/escape-from-tarkov-promo-codes/",
@@ -231,30 +231,27 @@ def is_patchnote(title: str, description: str) -> bool:
     return any(kw in (title + " " + description).lower() for kw in keywords)
 
 async def post_patchnote(item: dict, source_label: str, source_icon: str = ""):
-    """Patchnote als Discord Embed posten"""
+    """Patchnote im Original posten (keine Übersetzung)"""
     title = item.get("title", "")
     link = item.get("link", "")
     description = item.get("description", "")
 
-    full_text = await fetch_url(link) if link and "escapefromtarkov.com" in link else ""
-    content_for_claude = clean_html(full_text, 4000) if full_text else description
-
-    summary = ask_claude(
-        f"""Offizielle EFT/BSG Patchnote oder Update-Info. Erstelle eine deutsche Zusammenfassung.
-Struktur falls passend: **🐛 Bugfixes** | **⚙️ Änderungen** | **✨ Neue Inhalte** | **⚖️ Balance**
-Max 1000 Zeichen. Titel: {title}
-Inhalt: {content_for_claude[:2000]}""", 700
-    )
+    # Für BSG Website: vollständigen Text laden
+    if link and "escapefromtarkov.com" in link:
+        full_text = await fetch_url(link)
+        content_text = clean_html(full_text, 2000) if full_text else description
+    else:
+        content_text = description[:1000]
 
     embed = discord.Embed(
         title=f"🔧 {title[:200]}",
         url=link,
-        description=summary or description[:800],
+        description=content_text or description[:800],
         color=discord.Color.blue(),
         timestamp=datetime.now()
     )
     embed.set_author(name=source_label)
-    embed.set_footer(text=f"Quelle: {source_label} • Automatisch übersetzt")
+    embed.set_footer(text=f"Quelle: {source_label} • Original")
 
     for guild in bot.guilds:
         await post_to_channel(guild, EFT_PATCHNOTES_CHANNEL, embed)
@@ -282,7 +279,7 @@ async def check_eft_patchnotes():
                 count += 1
                 await asyncio.sleep(3)
 
-        # ── 2. Offizielle Twitter/X Accounts (via Nitter RSS) ─────────────
+        # ── 2. Offizielle Twitter/X Accounts von BSG & EFT (via Nitter) ──
         for feed_url in BSG_TWITTER_RSS_FEEDS:
             text = await fetch_url(feed_url)
             if not text:
@@ -291,17 +288,9 @@ async def check_eft_patchnotes():
                 tweet_id = item["link"]
                 if tweet_id in posted_patch_ids:
                     continue
-
-                # Nur Tweets die nach Patchnotes/Updates klingen
                 if not is_patchnote(item["title"], item["description"]):
                     continue
-
-                # Account bestimmen
-                if "bstategames" in feed_url:
-                    label = "Twitter/X – @bstategames (Battlestate Games)"
-                else:
-                    label = "Twitter/X – @tarkov_game (Escape from Tarkov)"
-
+                label = "Twitter/X – @bstategames" if "bstategames" in feed_url else "Twitter/X – @tarkov_game"
                 await post_patchnote(item, label)
                 posted_patch_ids.add(tweet_id)
                 count += 1
@@ -325,27 +314,26 @@ async def check_eft_release():
     print(f"🚀 Release-Check ({datetime.now().strftime('%H:%M')})")
     try:
         releases = []
+
+        # ── 1. Offizielle BSG Website ──────────────────────────────────────
         for url in EFT_RELEASE_SOURCES:
             text = await fetch_url(url)
             if not text:
                 continue
-            if "search.json" in url:
-                try:
-                    data = json.loads(text)
-                    for post in data.get("data", {}).get("children", [])[:5]:
-                        p = post.get("data", {})
-                        title = p.get("title", "")
-                        link = "https://reddit.com" + p.get("permalink", "")
-                        desc = p.get("selftext", "")[:500]
-                        if is_release_info(title, desc):
-                            releases.append({"id": link, "title": title, "link": link, "description": desc})
-                except:
-                    pass
-            else:
-                for item in parse_rss(text, 10):
-                    if is_release_info(item["title"], item["description"]):
-                        item["id"] = item["link"]
-                        releases.append(item)
+            for item in parse_rss(text, 10):
+                if is_release_info(item["title"], item["description"]) and is_from_bsg(item["link"]):
+                    item["id"] = item["link"]
+                    releases.append(item)
+
+        # ── 2. Offizielle Twitter/X Accounts ──────────────────────────────
+        for feed_url in BSG_TWITTER_RSS_FEEDS:
+            text = await fetch_url(feed_url)
+            if not text:
+                continue
+            for item in parse_rss(text, 15):
+                if is_release_info(item["title"], item["description"]):
+                    item["id"] = item["link"]
+                    releases.append(item)
 
         count = 0
         for release in releases:
