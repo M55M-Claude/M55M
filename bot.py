@@ -866,65 +866,92 @@ def hat_ahk(beschreibung: str, zuglast: int) -> tuple:
     return True, "AHK vorhanden (Zuglast nicht angegeben)"
 
 async def scrape_auto(marke, modell, preis_min, preis_max, km_max, jahr_min, jahr_max, urls) -> list:
-    """Generische Funktion um ein Auto auf allen Plattformen zu suchen – nur unfallfreie!"""
+    """Sucht Autos per Claude Web-Analyse – nur unfallfreie mit AHK aus Deutschland"""
     results = []
+
+    # Spezielle Header um Bot-Blocking zu umgehen
+    headers_as24 = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "de-DE,de;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Referer": "https://www.google.de/",
+    }
+
     for quelle, url in urls.items():
-        text = await fetch_url(url)
-        if not text:
+        print(f"  🔍 Suche auf {quelle}: {url[:80]}...")
+        try:
+            async with aiohttp.ClientSession(headers=headers_as24) as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=20)) as resp:
+                    print(f"  HTTP {resp.status} von {quelle}")
+                    if resp.status != 200:
+                        continue
+                    text = await resp.text()
+        except Exception as e:
+            print(f"  Fetch-Fehler {quelle}: {e}")
             continue
-        clean = clean_html(text, 4000)
+
+        if not text or len(text) < 500:
+            print(f"  Leere Antwort von {quelle}")
+            continue
+
+        clean = clean_html(text, 5000)
+        print(f"  Text-Länge nach Cleaning: {len(clean)} Zeichen")
+
         result = ask_claude(
-            f"Analysiere diese {quelle} Suchergebnisse. Extrahiere alle {marke} {modell} Angebote.\n"
-            f"Filter: {preis_min}€-{preis_max}€, max {km_max}km, {jahr_min}-{jahr_max}\n"
-            f"NUR Fahrzeuge aus DEUTSCHLAND aufnehmen (kein Ausland)!\n"
-            f"NUR unfallfreie Fahrzeuge OHNE Schäden/Probleme aufnehmen!\n"
-            f"NUR Fahrzeuge MIT Anhängerkupplung (AHK) und mind. {AHK_MIN_ZUGLAST}kg Zuglast aufnehmen!\n"
-            "Antworte NUR mit JSON-Array ([] wenn keine):\n"
-            '[{"titel":"...","preis":12345,"km":50000,"jahr":2021,"beschreibung":"Vollständige Beschreibung","unfallfrei":true,"ahk":true,"zuglast":2000,"standort":"Stadt, Deutschland","url":"..."}]\n\n'
-            f"Text: {clean}", 1000
+            f"Analysiere diese {quelle} Seite. Extrahiere ALLE {marke} {modell} Inserate/Angebote.\n"
+            f"Preisrange: {preis_min}€ bis {preis_max}€ | Max KM: {km_max} | Baujahr: {jahr_min}-{jahr_max}\n"
+            f"NUR aus Deutschland | NUR unfallfrei | NUR mit AHK (min. {AHK_MIN_ZUGLAST}kg Zuglast)\n"
+            f"Falls keine passenden Angebote: leeres Array zurückgeben.\n"
+            "Antworte AUSSCHLIESSLICH mit JSON-Array:\n"
+            '[{"titel":"VW Tiguan 2.0 TDI","preis":22500,"km":65000,"jahr":2022,"unfallfrei":true,"ahk":true,"zuglast":2500,"standort":"Stuttgart","beschreibung":"Kurze Beschreibung","url":"https://..."}]\n\n'
+            f"Seiteninhalt: {clean}", 1200
         )
-        match = re.search(r'\[.*\]', result, re.DOTALL)
-        if match:
-            try:
-                items = json.loads(match.group())
-                for item in items:
-                    # Claude-Filter: unfallfrei=false → überspringen
-                    if item.get("unfallfrei") == False:
-                        print(f"  ⏭️ Übersprungen (Claude: nicht unfallfrei): {item.get('titel','')}")
-                        continue
-                    # Keyword-Filter: Ausschlusswörter in Beschreibung
-                    beschr = item.get("beschreibung", "") + " " + item.get("titel", "")
-                    ok, grund = ist_unfallfrei(beschr)
-                    if not ok:
-                        print(f"  ⏭️ Übersprungen (Keyword '{grund}'): {item.get('titel','')}")
-                        continue
 
-                    # AHK-Filter: Claude sagt kein AHK → überspringen
-                    if item.get("ahk") == False:
-                        print(f"  ⏭️ Übersprungen (Claude: kein AHK): {item.get('titel','')}")
-                        continue
+        print(f"  Claude Antwort: {result[:200]}")
 
-                    # Deutschland-Check: Ausländische Standorte filtern
-                    ausland_keywords = ["österreich", "schweiz", "niederlande", "belgien", "frankreich",
-                                       "italien", "spanien", "polen", "tschechien", "ungarn", "nl", "at", "ch"]
-                    standort = item.get("standort", "").lower()
-                    if any(k in standort for k in ausland_keywords):
-                        print(f"  ⏭️ Übersprungen (Ausland: {standort}): {item.get('titel','')}")
-                        continue
+        match = re.search(r'\[.*?\]', result, re.DOTALL)
+        if not match:
+            print(f"  Kein JSON gefunden von {quelle}")
+            continue
 
-                    # AHK Keyword-Check
-                    ahk_ok, ahk_info = hat_ahk(beschr, AHK_MIN_ZUGLAST)
-                    if not ahk_ok:
-                        print(f"  ⏭️ Übersprungen ({ahk_info}): {item.get('titel','')}")
-                        continue
+        try:
+            items = json.loads(match.group())
+            print(f"  {len(items)} Angebote von Claude gefunden")
+        except Exception as e:
+            print(f"  JSON-Parse-Fehler: {e}")
+            continue
 
-                    item["ahk_info"] = ahk_info
-                    item["quelle"] = quelle
-                    item["auto"] = f"{marke} {modell}"
-                    results.extend([item])
-            except:
-                pass
-        await asyncio.sleep(2)
+        for item in items:
+            if item.get("unfallfrei") == False:
+                print(f"  ⏭️ Nicht unfallfrei: {item.get('titel','')}")
+                continue
+            if item.get("ahk") == False:
+                print(f"  ⏭️ Kein AHK: {item.get('titel','')}")
+                continue
+
+            beschr = item.get("beschreibung", "") + " " + item.get("titel", "")
+            ok, grund = ist_unfallfrei(beschr)
+            if not ok:
+                print(f"  ⏭️ Keyword '{grund}': {item.get('titel','')}")
+                continue
+
+            ausland = ["österreich", "schweiz", "niederlande", "belgien",
+                       "frankreich", "italien", "spanien", "polen"]
+            standort = item.get("standort", "").lower()
+            if any(k in standort for k in ausland):
+                print(f"  ⏭️ Ausland ({standort}): {item.get('titel','')}")
+                continue
+
+            ahk_ok, ahk_info = hat_ahk(beschr + " " + str(item.get("zuglast", "")), AHK_MIN_ZUGLAST)
+            item["ahk_info"] = ahk_info if ahk_ok else f"{item.get('zuglast', AHK_MIN_ZUGLAST)} kg"
+            item["quelle"] = quelle
+            item["auto"] = f"{marke} {modell}"
+            results.append(item)
+            print(f"  ✅ Angebot akzeptiert: {item.get('titel','')}")
+
+        await asyncio.sleep(3)
+
     return results
 
 def passes_filter_generic(item, preis_min, preis_max, km_max, jahr_min, jahr_max) -> bool:
